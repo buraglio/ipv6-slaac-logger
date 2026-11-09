@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -166,21 +167,26 @@ func (l *lineLog) dump(t *testing.T, name string) {
 	}
 }
 
-func startCollector(t *testing.T, state string) *collectorProc {
+func startCollector(t *testing.T, state string, roles ...string) *collectorProc {
 	t.Helper()
+	all := append([]string{"listen", "responder"}, roles...)
+	quoted := make([]string, len(all))
+	for i, r := range all {
+		quoted[i] = fmt.Sprintf("%q", r)
+	}
 	cfg := fmt.Sprintf(`state_dir = %q
 listen_addr = "[::]:547"
 
 [[interface]]
 name = "veth-c"
-roles = ["listen", "responder"]
+roles = [%s]
 
 [registrar]
 allowed_prefixes = ["2001:db8:10::/64"]
 
 [[log.output]]
 type = "stdout"
-`, state)
+`, state, strings.Join(quoted, ", "))
 	cfgPath := filepath.Join(state, "collector.toml")
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
@@ -273,4 +279,124 @@ func TestCollectorEndToEnd(t *testing.T) {
 			t.Fatalf("query output:\n%s", out)
 		}
 	})
+}
+
+// startRadvd runs radvd in ns, advertising prefix on ifname, until test cleanup.
+func startRadvd(t *testing.T, ns, ifname, prefix string) {
+	t.Helper()
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "radvd.conf")
+	pidPath := filepath.Join(dir, "radvd.pid")
+	cfg := fmt.Sprintf(`interface %s {
+	AdvSendAdvert on;
+	MinRtrAdvInterval 3;
+	MaxRtrAdvInterval 4;
+	AdvOtherConfigFlag on;
+	prefix %s {
+		AdvOnLink on;
+		AdvAutonomous on;
+	};
+};
+`, ifname, prefix)
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sh(t, "ip", "netns", "exec", ns, "sysctl", "-w", "net.ipv6.conf.all.forwarding=1")
+	cmd := exec.Command("ip", "netns", "exec", ns, "radvd", "-n", "-m", "stderr", "-C", cfgPath, "-p", pidPath)
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		<-done
+		if t.Failed() {
+			t.Logf("radvd output:\n%s", out.String())
+		}
+	})
+}
+
+var macRE = regexp.MustCompile(`link/ether ([0-9a-f]{2}(?::[0-9a-f]{2}){5})`)
+
+func linkMAC(t *testing.T, ns, ifname string) string {
+	t.Helper()
+	out := sh(t, "ip", "-n", ns, "-o", "link", "show", ifname)
+	m := macRE.FindStringSubmatch(strings.ToLower(out))
+	if m == nil {
+		t.Fatalf("no MAC in %q", out)
+	}
+	return m[1]
+}
+
+func (l *lineLog) count(subs ...string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := 0
+	for _, ln := range l.lines {
+		ok := true
+		for _, s := range subs {
+			if !strings.Contains(ln, s) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			n++
+		}
+	}
+	return n
+}
+
+func TestSnifferEndToEnd(t *testing.T) {
+	setupNetns(t)
+	state := t.TempDir()
+	c := startCollector(t, state, "sniff")
+	stdout := c.stdout
+	mac := linkMAC(t, "ral-h", "veth-h")
+	// The capture socket must be open before the DAD probe is sent.
+	c.stderr.waitFor(t, 10*time.Second, "sniffer capturing", "link=veth-c")
+
+	// DAD: a new address with DAD enabled sends an NS from ::.
+	sh(t, "ip", "-n", "ral-h", "-6", "addr", "add", "2001:db8:10::200/64", "dev", "veth-h")
+	stdout.waitFor(t, 10*time.Second, `"event":"nd.new"`, `"addr":"2001:db8:10::200"`,
+		`"mac":"`+mac+`"`, `"kind":"dad"`, `"link":"veth-c"`)
+
+	// VLAN: the kernel strips the tag on veth into PACKET_AUXDATA.
+	sh(t, "ip", "-n", "ral-h", "link", "add", "link", "veth-h", "name", "veth-h.20", "type", "vlan", "id", "20")
+	sh(t, "ip", "-n", "ral-h", "link", "set", "veth-h.20", "up")
+	sh(t, "ip", "-n", "ral-h", "-6", "addr", "add", "2001:db8:20::5/64", "dev", "veth-h.20")
+	stdout.waitFor(t, 10*time.Second, `"event":"nd.new"`, `"addr":"2001:db8:20::5"`, `"vlan":20`)
+
+	// RA: radvd in the collector's namespace; its outgoing RA must be seen.
+	startRadvd(t, "ral-c", "veth-c", "2001:db8:10::/64")
+	stdout.waitFor(t, 15*time.Second, `"event":"ra.seen"`, `"other":true`, `"prefixes":["2001:db8:10::/64"]`)
+
+	// Repeat silence: further NS/NA traffic must not re-emit nd.new.
+	before := stdout.count(`"event":"nd.new"`, `"addr":"2001:db8:10::200"`)
+	if before == 0 {
+		t.Fatal("no nd.new for ::200 counted")
+	}
+	for i := 0; i < 5; i++ {
+		_ = exec.Command("ip", "netns", "exec", "ral-c", "ping", "-6", "-c", "1", "-W", "1", "2001:db8:10::200").Run()
+	}
+	time.Sleep(2 * time.Second)
+	if after := stdout.count(`"event":"nd.new"`, `"addr":"2001:db8:10::200"`); after != before {
+		t.Fatalf("nd.new for ::200 repeated: %d -> %d", before, after)
+	}
+
+	// Query the persisted sighting.
+	c.stop(t)
+	out := sh(t, filepath.Join(binDir, "collector"), "query", "-db", filepath.Join(state, "ra-logger.db"),
+		"-addr", "2001:db8:10::200", "-json")
+	for _, want := range []string{`"sightings"`, mac, `"mac_src": "nd"`} {
+		if !strings.Contains(out, want) && !strings.Contains(out, strings.ReplaceAll(want, `": "`, `":"`)) {
+			t.Fatalf("query -json lacks %s:\n%s", want, out)
+		}
+	}
 }

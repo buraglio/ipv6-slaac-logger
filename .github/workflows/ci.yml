@@ -61,6 +61,8 @@ jobs:
         with:
           go-version: '1.26.x'
           check-latest: true
+      - name: Install radvd
+        run: sudo apt-get update && sudo apt-get install -y radvd
       - name: Build static binaries and the e2e test
         run: |
           mkdir -p bin
