@@ -3,8 +3,190 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"flag"
+	"fmt"
 	"io"
+	"net"
+	"net/netip"
+	"text/tabwriter"
+	"time"
+
+	"github.com/buraglio/ipv6-ra-logger/internal/collector/query"
+	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-ra-logger/internal/event"
 )
 
-func queryCmd(args []string, w io.Writer) error { return errors.New("query: implemented in Task 13") }
+type holderOut struct {
+	At    time.Time `json:"at"`
+	Held  bool      `json:"held"`
+	DUID  string    `json:"duid,omitempty"`
+	MAC   string    `json:"mac,omitempty"`
+	Host  string    `json:"host,omitempty"`
+	Since time.Time `json:"since,omitzero"`
+}
+
+type queryResult struct {
+	Bindings []store.Binding `json:"bindings"`
+	Events   []event.Event   `json:"events"`
+	Holder   *holderOut      `json:"holder,omitempty"`
+}
+
+func queryCmd(args []string, w io.Writer) error {
+	fs := flag.NewFlagSet("query", flag.ContinueOnError)
+	db := fs.String("db", "/var/lib/ra-logger/ra-logger.db", "collector database")
+	addrS := fs.String("addr", "", "IPv6 address to look up")
+	macS := fs.String("mac", "", "MAC address to look up")
+	duidS := fs.String("duid", "", "DUID (hex) to look up")
+	atS := fs.String("at", "", "RFC 3339 time: events up to then, and who held -addr then")
+	fromS := fs.String("from", "", "RFC 3339 start of the event window")
+	toS := fs.String("to", "", "RFC 3339 end of the event window")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	field, value, err := lookupKey(*addrS, *macS, *duidS)
+	if err != nil {
+		return err
+	}
+	from, err := parseTime(*fromS)
+	if err != nil {
+		return err
+	}
+	to, err := parseTime(*toS)
+	if err != nil {
+		return err
+	}
+	at, err := parseTime(*atS)
+	if err != nil {
+		return err
+	}
+	if !at.IsZero() {
+		if !to.IsZero() {
+			return errors.New("use -at or -to, not both")
+		}
+		to = at
+	}
+	st, err := store.OpenReadOnly(*db)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	ctx := context.Background()
+	evs, err := st.EventsWhere(ctx, field, value, from, to)
+	if err != nil {
+		return err
+	}
+	bs, err := st.BindingsWhere(ctx, field, value)
+	if err != nil {
+		return err
+	}
+	res := queryResult{Bindings: bs, Events: make([]event.Event, len(evs))}
+	for i, se := range evs {
+		res.Events[i] = se.Event
+	}
+	if field == "addr" && !at.IsZero() {
+		h, held := query.HolderAt(evs, at)
+		res.Holder = &holderOut{At: at, Held: held, DUID: h.DUID, MAC: h.MAC, Host: h.Host, Since: h.Since}
+	}
+	if *asJSON {
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(res)
+	}
+	return writeText(w, res)
+}
+
+func lookupKey(addr, mac, duid string) (string, string, error) {
+	n := 0
+	for _, s := range []string{addr, mac, duid} {
+		if s != "" {
+			n++
+		}
+	}
+	if n != 1 {
+		return "", "", errors.New("exactly one of -addr, -mac, -duid is required")
+	}
+	switch {
+	case addr != "":
+		a, err := netip.ParseAddr(addr)
+		if err != nil {
+			return "", "", err
+		}
+		return "addr", a.String(), nil
+	case mac != "":
+		m, err := net.ParseMAC(mac)
+		if err != nil {
+			return "", "", err
+		}
+		return "mac", m.String(), nil
+	default:
+		d, err := dhcp6.ParseHex(duid)
+		if err != nil {
+			return "", "", err
+		}
+		return "duid", dhcp6.FormatHex(d), nil
+	}
+}
+
+func parseTime(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.RFC3339, s)
+}
+
+func ts(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
+func dash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+func writeText(w io.Writer, res queryResult) error {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "CURRENT BINDINGS")
+	if len(res.Bindings) == 0 {
+		fmt.Fprintln(tw, "  (none)")
+	} else {
+		fmt.Fprintln(tw, "ADDR\tDUID\tMAC\tHOST\tVIA\tLINK\tFIRST SEEN\tLAST SEEN\tEXPIRES")
+		for _, b := range res.Bindings {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				b.Addr, b.DUID, dash(b.MAC), dash(b.Host), b.Via, b.Link, ts(b.FirstSeen), ts(b.LastSeen), ts(b.ExpiresAt))
+		}
+	}
+	fmt.Fprintln(tw)
+	fmt.Fprintln(tw, "EVENTS")
+	if len(res.Events) == 0 {
+		fmt.Fprintln(tw, "  (none)")
+	} else {
+		fmt.Fprintln(tw, "TIME\tEVENT\tADDR\tDUID\tMAC\tHOST\tVIA\tDETAIL")
+		for _, e := range res.Events {
+			detail := e.Reason
+			if e.PrevDUID != "" {
+				detail = "prev_duid=" + e.PrevDUID
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				ts(e.TS), e.Type, dash(e.Addr), dash(e.DUID), dash(e.MAC), dash(e.Host), dash(e.Via), dash(detail))
+		}
+	}
+	if h := res.Holder; h != nil {
+		fmt.Fprintln(tw)
+		if h.Held {
+			fmt.Fprintf(tw, "Holder at %s: duid=%s mac=%s host=%s since=%s\n", ts(h.At), h.DUID, dash(h.MAC), dash(h.Host), ts(h.Since))
+		} else {
+			fmt.Fprintf(tw, "No holder at %s\n", ts(h.At))
+		}
+	}
+	return tw.Flush()
+}
