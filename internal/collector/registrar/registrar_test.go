@@ -346,3 +346,26 @@ func TestStoreReadErrorDropsWithoutRecording(t *testing.T) {
 		t.Fatalf("records=%d replied=%d", rec.n, r.Stats.Replied.Load())
 	}
 }
+
+func TestInvalidDoesNotDrainGlobalBucket(t *testing.T) {
+	e := newEnv(t)
+	e.r.Limits = NewLimiter(Limits{Global: Rate{0.001, 1}, PerPrefix: Rate{1000, 1000}, PerDUID: Rate{1000, 1000}})
+	for i := 0; i < 100; i++ {
+		// A different /64 each time, outside every policy prefix (spoofed sources).
+		b := netip.MustParseAddr("2001:db9::5").As16()
+		b[6], b[7] = byte(i>>8), byte(i)
+		a := netip.AddrFrom16(b)
+		if e.r.Handle(ctx, mcastReq(inform(t, a, testDUID, 7200), a)) != nil {
+			t.Fatalf("out-of-policy message %d got a reply", i)
+		}
+	}
+	if e.r.Stats.RateLimited.Load() != 0 {
+		t.Fatalf("rate_limited = %d, want 0", e.r.Stats.RateLimited.Load())
+	}
+	if e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 7200), testAddr)) == nil {
+		t.Fatal("valid registration denied: invalid messages drained the global bucket")
+	}
+	if e.r.Stats.Received.Load() != 101 || e.r.Stats.Rejected.Load() != 100 {
+		t.Fatalf("received=%d rejected=%d", e.r.Stats.Received.Load(), e.r.Stats.Rejected.Load())
+	}
+}

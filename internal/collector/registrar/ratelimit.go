@@ -46,6 +46,7 @@ func NewLimiter(l Limits) *Limiter {
 
 // AllowSource checks the per-/64 bucket for src, then the global bucket. The
 // per-/64 check runs first so a flooding prefix cannot drain the global bucket.
+// Callers must call it only after Validate succeeds.
 func (l *Limiter) AllowSource(src netip.Addr, now time.Time) bool {
 	p, err := src.Unmap().WithZone("").Prefix(64)
 	if err != nil {
@@ -97,7 +98,8 @@ func (k *keyed) sweep(now time.Time) {
 }
 
 // Allow reports whether key has a token at now. A new key is refused, without
-// being inserted, while the map is full even after an idle sweep (fail closed).
+// being inserted, while the map is full even after an idle sweep, or while it is
+// full and the last sweep was under a second ago (fail closed).
 func (k *keyed) Allow(key string, now time.Time) bool {
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -107,6 +109,11 @@ func (k *keyed) Allow(key string, now time.Time) bool {
 	e, ok := k.m[key]
 	if !ok {
 		if len(k.m) >= k.max {
+			// The forced O(n) sweep runs at most once per second, so a flood
+			// of new keys at cap cannot make every call walk the whole map.
+			if now.Sub(k.lastSweep) <= time.Second {
+				return false
+			}
 			k.sweep(now)
 			if len(k.m) >= k.max {
 				return false

@@ -90,13 +90,16 @@ func New(b BindingStore, rec Recorder, pol *PrefixPolicy, serverID []byte, pen u
 func (r *Registrar) Handle(ctx context.Context, req *Request) *dhcp6.Message {
 	now := r.Now()
 	r.Stats.Received.Add(1)
-	if !r.Limits.AllowSource(limitKey(req), now) {
-		r.limited()
-		return nil
-	}
+	// Validate (including the prefix policy) runs before any token bucket is
+	// charged, so spoofed or out-of-policy traffic cannot drain the global
+	// bucket; rejects are bounded separately by rejectLog.
 	v, reason := Validate(req, r.Policy)
 	if reason != "" {
 		r.reject(ctx, req, reason, now)
+		return nil
+	}
+	if !r.Limits.AllowSource(limitKey(req), now) {
+		r.limited()
 		return nil
 	}
 	if !r.Limits.AllowDUID(v.DUID, now) {

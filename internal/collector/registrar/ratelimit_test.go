@@ -93,3 +93,29 @@ func TestKeyedHardCap(t *testing.T) {
 		t.Fatal("key denied after idle eviction freed capacity")
 	}
 }
+
+func TestKeyedAtCapForcedSweepIsThrottled(t *testing.T) {
+	k := newKeyed(rate.Limit(1), 1)
+	k.max = 1
+	k.Allow("a", t0)
+	// Make "a" idle so a sweep would evict it, but mark a sweep as just done.
+	now := t0.Add(11 * time.Minute)
+	k.lastSweep = now.Add(-500 * time.Millisecond)
+	before := k.lastSweep
+	if k.Allow("b", now) {
+		t.Fatal("new key admitted at cap within 1s of the last sweep")
+	}
+	if !k.lastSweep.Equal(before) {
+		t.Fatal("forced sweep ran within 1s of the last sweep")
+	}
+	if _, ok := k.m["a"]; !ok {
+		t.Fatal("idle entry evicted without a sweep")
+	}
+	later := now.Add(600 * time.Millisecond)
+	if !k.Allow("b", later) {
+		t.Fatal("new key denied after >1s: forced sweep did not run")
+	}
+	if !k.lastSweep.Equal(later) {
+		t.Fatalf("lastSweep = %v, want %v", k.lastSweep, later)
+	}
+}
