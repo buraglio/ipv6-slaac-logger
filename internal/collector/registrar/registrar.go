@@ -323,6 +323,8 @@ func (r *Registrar) Sweep(ctx context.Context) {
 		}
 		e.FirstSeen = event.TimePtr(b.FirstSeen)
 		e.LastSeen = event.TimePtr(b.LastSeen)
+		e.Valid = event.U32(b.Valid)
+		e.Preferred = event.U32(b.Preferred)
 		if err := r.Rec.Record(ctx, store.Change{Events: []event.Event{e}, Delete: []netip.Addr{b.Addr}}); err != nil {
 			r.Log.Error("registrar: record expire", "addr", b.Addr, "err", err)
 		}

@@ -89,7 +89,12 @@ func queryCmd(args []string, w io.Writer) error {
 		res.Events[i] = se.Event
 	}
 	if field == "addr" && !at.IsZero() {
-		h, held := query.HolderAt(evs, at)
+		// The holder may have been set before -from, so replay the full history.
+		all, err := st.EventsWhere(ctx, field, value, time.Time{}, time.Time{})
+		if err != nil {
+			return err
+		}
+		h, held := query.HolderAt(all, at)
 		res.Holder = &holderOut{At: at, Held: held, DUID: h.DUID, MAC: h.MAC, Host: h.Host, Since: h.Since}
 	}
 	if *asJSON {

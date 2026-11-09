@@ -305,6 +305,9 @@ func TestSweepExpires(t *testing.T) {
 	if len(evs) != 2 || evs[1].Type != event.RegExpire || evs[1].LastSeen == nil || !evs[1].LastSeen.Equal(t0) {
 		t.Fatalf("events = %+v", evs)
 	}
+	if evs[1].Valid == nil || *evs[1].Valid != 10 {
+		t.Fatalf("expire Valid = %v, want 10", evs[1].Valid)
+	}
 	if _, ok := e.binding(testAddr); ok {
 		t.Fatal("expired binding not removed")
 	}

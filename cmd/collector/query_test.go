@@ -38,8 +38,14 @@ func TestQueryCmd(t *testing.T) {
 	if err := queryCmd([]string{"-db", path, "-addr", "2001:db8:10:0::5", "-at", t0.Add(time.Hour).Format(time.RFC3339)}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "Holder at") || !strings.Contains(out.String(), add.DUID) {
-		t.Fatalf("text output:\n%s", out.String())
+	holderLine := ""
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.HasPrefix(line, "Holder at") {
+			holderLine = line
+		}
+	}
+	if holderLine == "" || !strings.Contains(holderLine, add.DUID) {
+		t.Fatalf("holder line %q missing DUID %s in text output:\n%s", holderLine, add.DUID, out.String())
 	}
 
 	out.Reset()
@@ -55,6 +61,17 @@ func TestQueryCmd(t *testing.T) {
 	}
 	if err := json.Unmarshal(out.Bytes(), &res); err != nil || res.Holder.Held || len(res.Events) != 2 {
 		t.Fatalf("json output: %s (%v)", out.String(), err)
+	}
+
+	// -from starts after the reg.add, so the window holds no events; the holder must still be found.
+	out.Reset()
+	if err := queryCmd([]string{"-db", path, "-addr", "2001:db8:10::5", "-from", t0.Add(30 * time.Minute).Format(time.RFC3339),
+		"-at", t0.Add(time.Hour).Format(time.RFC3339), "-json"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	res.Holder.Held, res.Holder.DUID = false, ""
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil || !res.Holder.Held || res.Holder.DUID != add.DUID || len(res.Events) != 0 {
+		t.Fatalf("-from json output: %s (%v)", out.String(), err)
 	}
 
 	if err := queryCmd([]string{"-db", path}, &out); err == nil {
