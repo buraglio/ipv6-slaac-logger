@@ -58,6 +58,12 @@ type entry struct {
 	store.Sighting
 	dirty     bool
 	lastWrite time.Time
+	// gen increments on every in-memory change, so an outcome applied after an
+	// unlocked Record can tell whether the entry changed meanwhile.
+	gen uint64
+	// expireEmitted is set once the nd.expire event was handed to Record, so
+	// retries after a recorder error write only the Expired row.
+	expireEmitted bool
 }
 
 func (k key) macLV() macLV { return macLV{k.mac, k.link, k.vlan} }
@@ -131,6 +137,7 @@ func (t *Tracker) checkProxy(m macLV) {
 	for _, e := range t.byMAC[m] {
 		e.ProxySuspect = true
 		e.dirty = true
+		e.gen++
 	}
 	t.log.Warn("proxy_suspect", "mac", m.mac, "link", m.link)
 }
@@ -177,15 +184,17 @@ func (t *Tracker) quiet(e *entry) bool {
 // Observe records one observation.
 func (t *Tracker) Observe(ctx context.Context, o Observation) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	now := t.now()
 	k := key{o.MAC.String(), o.Addr, o.Link, o.VLAN}
 	if e, ok := t.entries[k]; ok {
-		e.LastSeen, e.Kind, e.dirty = now, o.Kind, true
+		e.LastSeen, e.Kind, e.dirty, e.expireEmitted = now, o.Kind, true, false
+		e.gen++
+		t.mu.Unlock()
 		return
 	}
 	if len(t.entries) >= t.cfg.MaxEntries {
 		t.overflow++
+		t.mu.Unlock()
 		return
 	}
 	e := &entry{Sighting: store.Sighting{
@@ -218,50 +227,84 @@ func (t *Tracker) Observe(ctx context.Context, o Observation) {
 		}
 	}
 	ch.PutSightings = []store.Sighting{e.Sighting}
-	if err := t.rec.Record(ctx, ch); err != nil {
+	t.mu.Unlock()
+
+	// The event is handed to Record exactly once; on error only the row is
+	// retried (via the dirty flag), never the event.
+	err := t.rec.Record(ctx, ch)
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if err != nil {
 		t.log.Error("record sighting", "err", err)
-		e.dirty, e.lastWrite = true, time.Time{}
+		if t.entries[k] == e {
+			e.dirty, e.lastWrite = true, time.Time{}
+		}
 		return
 	}
-	e.lastWrite = now
+	if t.entries[k] == e {
+		e.lastWrite = now
+	}
 }
 
 // Tick expires idle keys and flushes dirty ones in a single Change.
 func (t *Tracker) Tick(ctx context.Context) {
+	type pending struct {
+		k   key
+		e   *entry
+		gen uint64
+	}
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	now := t.now()
 	var ch store.Change
-	var expired []key
-	var flushed []*entry
+	var expired, flushed []pending
 	for k, e := range t.entries {
 		if now.Sub(e.LastSeen) >= t.cfg.Idle {
-			if !t.quiet(e) {
-				ev := t.newEvent(event.NDExpire, e, now)
-				ev.FirstSeen, ev.LastSeen = event.TimePtr(e.FirstSeen), event.TimePtr(e.LastSeen)
-				ch.Events = append(ch.Events, ev)
+			if !e.expireEmitted {
+				if !t.quiet(e) {
+					ev := t.newEvent(event.NDExpire, e, now)
+					ev.FirstSeen, ev.LastSeen = event.TimePtr(e.FirstSeen), event.TimePtr(e.LastSeen)
+					ch.Events = append(ch.Events, ev)
+				}
+				e.expireEmitted = true
 			}
 			row := e.Sighting
 			row.Expired = true
 			ch.PutSightings = append(ch.PutSightings, row)
-			expired = append(expired, k)
+			expired = append(expired, pending{k, e, e.gen})
 		} else if e.dirty && now.Sub(e.lastWrite) >= t.cfg.Flush {
 			ch.PutSightings = append(ch.PutSightings, e.Sighting)
-			flushed = append(flushed, e)
+			flushed = append(flushed, pending{k, e, e.gen})
 		}
 	}
+	t.mu.Unlock()
 	if len(ch.PutSightings) == 0 {
 		return
 	}
-	if err := t.rec.Record(ctx, ch); err != nil {
+
+	err := t.rec.Record(ctx, ch)
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if err != nil {
 		t.log.Error("record tick", "err", err)
 		return
 	}
-	for _, e := range flushed {
-		e.dirty, e.lastWrite = false, now
+	for _, p := range flushed {
+		if t.entries[p.k] == p.e && p.e.gen == p.gen {
+			p.e.dirty, p.e.lastWrite = false, now
+		}
 	}
-	for _, k := range expired {
-		t.remove(k)
+	for _, p := range expired {
+		if t.entries[p.k] != p.e {
+			continue
+		}
+		if p.e.gen == p.gen {
+			t.remove(p.k)
+		} else {
+			// Observed again while the Expired row was in flight: rewrite it live.
+			p.e.dirty, p.e.lastWrite = true, time.Time{}
+		}
 	}
 }
 
@@ -269,9 +312,10 @@ func (t *Tracker) Tick(ctx context.Context) {
 func (t *Tracker) MACFor(addr netip.Addr) (string, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	now := t.now()
 	var best *entry
 	for _, e := range t.byAddr[addr] {
-		if e.ProxySuspect || e.Expired {
+		if e.ProxySuspect || now.Sub(e.LastSeen) >= t.cfg.Idle {
 			continue
 		}
 		if best == nil || e.LastSeen.After(best.LastSeen) {

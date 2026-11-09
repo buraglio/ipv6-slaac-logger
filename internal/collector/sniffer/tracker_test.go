@@ -19,12 +19,18 @@ import (
 type fakeRec struct {
 	mu      sync.Mutex
 	changes []store.Change
+	calls   []store.Change // every Record call, including failed ones
 	err     error
+	delay   time.Duration
 }
 
 func (f *fakeRec) Record(_ context.Context, c store.Change) error {
+	if f.delay > 0 {
+		time.Sleep(f.delay)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.calls = append(f.calls, c)
 	if f.err != nil {
 		return f.err
 	}
@@ -272,5 +278,101 @@ func TestTrackerRecorderErrorKeepsDirty(t *testing.T) {
 	cs := rec.all()
 	if len(cs) != 1 || len(cs[0].PutSightings) != 1 {
 		t.Fatalf("changes = %+v", cs)
+	}
+}
+
+func TestTrackerExpireEventNotResentOnRetry(t *testing.T) {
+	tr, rec, clk, _ := newTestTracker(t, DefaultTrackerConfig())
+	ctx := context.Background()
+	tr.Observe(ctx, obs(t, "aa:bb:cc:00:00:01", "2001:db8::1"))
+	rec.mu.Lock()
+	rec.calls = nil
+	rec.err = errors.New("boom")
+	rec.mu.Unlock()
+	clk.t = clk.t.Add(25 * time.Hour)
+	tr.Tick(ctx)
+	tr.Tick(ctx)
+	rec.mu.Lock()
+	rec.err = nil
+	rec.mu.Unlock()
+	tr.Tick(ctx)
+	rec.mu.Lock()
+	calls := append([]store.Change(nil), rec.calls...)
+	rec.mu.Unlock()
+	expires := 0
+	for _, c := range calls {
+		for _, e := range c.Events {
+			if e.Type == event.NDExpire {
+				expires++
+			}
+		}
+	}
+	last := calls[len(calls)-1]
+	if len(calls) != 3 || expires != 1 || len(last.PutSightings) != 1 || !last.PutSightings[0].Expired {
+		t.Fatalf("calls=%d expires=%d last=%+v", len(calls), expires, last)
+	}
+	if len(tr.entries) != 0 {
+		t.Fatal("entry should be removed after success")
+	}
+}
+
+func TestTrackerMACForIgnoresIdle(t *testing.T) {
+	tr, _, clk, _ := newTestTracker(t, DefaultTrackerConfig())
+	tr.Observe(context.Background(), obs(t, "aa:bb:cc:00:00:01", "2001:db8::1"))
+	clk.t = clk.t.Add(24 * time.Hour) // no Tick yet
+	if _, ok := tr.MACFor(netip.MustParseAddr("2001:db8::1")); ok {
+		t.Fatal("idle entry should miss before Tick")
+	}
+}
+
+func TestTrackerConcurrentObserve(t *testing.T) {
+	cfg := DefaultTrackerConfig()
+	cfg.ProxyThreshold = 1000
+	tr, rec, _, _ := newTestTracker(t, cfg)
+	rec.delay = 2 * time.Millisecond
+	ctx := context.Background()
+	const workers, keys = 8, 40
+	var wg sync.WaitGroup
+	done := make(chan struct{})
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < keys; i++ {
+				// overlapping across workers: key index i%20 shared, plus per-worker keys
+				tr.Observe(ctx, obs(t, fmt.Sprintf("aa:bb:cc:00:01:%02x", i%20), fmt.Sprintf("2001:db8::%x", i%20)))
+				tr.Observe(ctx, obs(t, fmt.Sprintf("aa:bb:cc:00:02:%02x", w), fmt.Sprintf("2001:db8:1::%x", i)))
+			}
+		}()
+	}
+	var bg sync.WaitGroup
+	bg.Add(1)
+	go func() {
+		defer bg.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				tr.Tick(ctx)
+				tr.MACFor(netip.MustParseAddr("2001:db8::1"))
+			}
+		}
+	}()
+	finished := make(chan struct{})
+	go func() { wg.Wait(); close(finished) }()
+	select {
+	case <-finished:
+	case <-time.After(30 * time.Second):
+		t.Fatal("deadlock")
+	}
+	close(done)
+	bg.Wait()
+	want := 20 + workers*keys
+	tr.mu.Lock()
+	got := len(tr.entries)
+	tr.mu.Unlock()
+	if got != want {
+		t.Fatalf("live = %d want %d", got, want)
 	}
 }
