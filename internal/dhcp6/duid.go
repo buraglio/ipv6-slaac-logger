@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 )
 
 // DUID types (RFC 8415 §11, RFC 6355).
@@ -84,4 +85,15 @@ func NewDUIDLL(mac net.HardwareAddr) []byte {
 // NewDUIDUUID builds a DUID-UUID (RFC 6355).
 func NewDUIDUUID(u [16]byte) []byte {
 	return append([]byte{0, 4}, u[:]...)
+}
+
+// NewDUIDLLT builds a DUID-LLT for an Ethernet MAC; the time field is
+// seconds since 2000-01-01T00:00:00Z modulo 2^32 (RFC 8415 §11.2).
+func NewDUIDLLT(mac net.HardwareAddr, t time.Time) []byte {
+	epoch := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	d := make([]byte, 8, 8+len(mac))
+	binary.BigEndian.PutUint16(d[0:2], DUIDTypeLLT)
+	binary.BigEndian.PutUint16(d[2:4], HWTypeEthernet)
+	binary.BigEndian.PutUint32(d[4:8], uint32(int64(t.Sub(epoch)/time.Second)))
+	return append(d, mac...)
 }

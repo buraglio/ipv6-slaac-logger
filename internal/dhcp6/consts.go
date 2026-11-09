@@ -20,6 +20,7 @@ const (
 	OptServerID            uint16 = 2
 	OptIAAddr              uint16 = 5
 	OptORO                 uint16 = 6
+	OptElapsedTime         uint16 = 8
 	OptRelayMsg            uint16 = 9
 	OptUserClass           uint16 = 15
 	OptVendorClass         uint16 = 16

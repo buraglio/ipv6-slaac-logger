@@ -5,8 +5,10 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 var testMAC = net.HardwareAddr{0x5c, 0x1e, 0x9a, 0x3b, 0x21, 0xaa}
@@ -207,4 +209,45 @@ func FuzzParseFQDN(f *testing.F) {
 			}
 		}
 	})
+}
+
+func TestNewDUIDLLT(t *testing.T) {
+	mac, _ := net.ParseMAC("5c:1e:9a:3b:21:aa")
+	d := NewDUIDLLT(mac, time.Date(2000, 1, 1, 0, 1, 40, 0, time.UTC)) // 100 s after epoch
+	want := []byte{0, 1, 0, 1, 0, 0, 0, 100, 0x5c, 0x1e, 0x9a, 0x3b, 0x21, 0xaa}
+	if !bytes.Equal(d, want) {
+		t.Fatalf("got % x", d)
+	}
+	if got, ok := MACFromDUID(d); !ok || got.String() != mac.String() {
+		t.Fatal("MACFromDUID round trip")
+	}
+	if DUIDTypeName(d) != "LLT" {
+		t.Fatal("type name")
+	}
+}
+
+func TestNewInformationRequest(t *testing.T) {
+	duid := NewDUIDLL(net.HardwareAddr{2, 0, 0, 0, 0, 1})
+	m := NewInformationRequest([3]byte{1, 2, 3}, duid)
+	b, err := m.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := ParseMessage(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Type != MsgInformationRequest || p.XID != [3]byte{1, 2, 3} {
+		t.Fatalf("%+v", p)
+	}
+	codes := []uint16{}
+	for _, o := range p.Options {
+		codes = append(codes, o.Code)
+	}
+	if !slices.Equal(codes, []uint16{OptClientID, OptORO, OptElapsedTime}) {
+		t.Fatalf("codes %v", codes)
+	}
+	if o, _ := p.Options.Get(OptORO); !bytes.Equal(o.Data, []byte{0, 0x94}) {
+		t.Fatal("ORO")
+	}
 }
