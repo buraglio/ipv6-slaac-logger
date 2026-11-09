@@ -29,6 +29,8 @@ SystemCallFilter=@system-service
 SystemCallArchitectures=native
 Restart=on-failure
 RestartSec=5s
+# Do not let journald drop a replayed event backlog (or a registration burst).
+LogRateLimitIntervalSec=0
 
 [Install]
 WantedBy=multi-user.target

@@ -30,6 +30,14 @@ CGO_ENABLED=0 go build -o bin/regsend ./cmd/regsend   # developer test tool
 4. If the link has no other DHCPv6 server, give the interface the `responder` role and **set the O flag in the router's RAs**. Native RFC 9686 clients only register after a DHCPv6 server returns option 148.
 5. If registrations arrive through DHCPv6 relays, list the relays' source prefixes in `registrar.trusted_relays` (relayed messages from anyone else are dropped) and their client prefixes in `registrar.relay_prefixes`.
 
+**Syslog rate limits.** When `/dev/log` is served by journald or by rsyslog's
+`imuxsock`, their rate limits must be disabled or raised for ra-logger.
+Otherwise a replayed backlog (or a burst of registrations) can be dropped by
+the daemon after the collector has counted it as delivered. The shipped unit
+sets `LogRateLimitIntervalSec=0` for journald; for `imuxsock` use
+`module(load="imuxsock" ratelimit.interval="0")` (or raise
+`ratelimit.burst`).
+
 Look up an address:
 
 ```sh
