@@ -68,3 +68,17 @@ func TestParsePrefixesMasks(t *testing.T) {
 		t.Fatalf("got %v %v", p, err)
 	}
 }
+
+func TestRetentionDaysZeroRejected(t *testing.T) {
+	_, err := Load(write(t, "retention_days = 0\n"))
+	if err == nil || err.Error() != "config: retention_days must be at least 1 (omit it for the 400-day default)" {
+		t.Fatalf("err = %v", err)
+	}
+	c, err := Load(write(t, "state_dir = \"/tmp/x\"\n"))
+	if err != nil || c.RetentionDays != 400 {
+		t.Fatalf("omitted retention_days: %+v %v", c, err)
+	}
+	if _, err := Load(write(t, "retention_days = -3\n")); err == nil {
+		t.Fatal("negative retention_days accepted")
+	}
+}

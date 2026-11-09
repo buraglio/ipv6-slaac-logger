@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 	"slices"
@@ -65,6 +66,8 @@ type Output struct {
 	ServerName string `toml:"server_name"`
 }
 
+var errRetention = errors.New("config: retention_days must be at least 1 (omit it for the 400-day default)")
+
 // Load reads, defaults and validates the file at path. Unknown keys are errors.
 func Load(path string) (*Config, error) {
 	var c Config
@@ -78,6 +81,11 @@ func Load(path string) (*Config, error) {
 			keys[i] = k.String()
 		}
 		return nil, fmt.Errorf("config: unknown keys: %s", strings.Join(keys, ", "))
+	}
+	// An explicit 0 is an error, not "use the default": it would otherwise
+	// silently mean 400 days to someone who asked for no retention.
+	if md.IsDefined("retention_days") && c.RetentionDays < 1 {
+		return nil, errRetention
 	}
 	c.applyDefaults()
 	if err := c.Validate(); err != nil {
@@ -151,7 +159,7 @@ func (c *Config) Validate() error {
 		}
 	}
 	if c.RetentionDays < 1 {
-		return fmt.Errorf("config: retention_days must be at least 1")
+		return errRetention
 	}
 	return nil
 }
