@@ -50,6 +50,9 @@ func Validate(req *Request, pol *PrefixPolicy) (Valid, string) {
 		return Valid{}, ReasonIAAddr
 	}
 	iaOpt, _ := m.Options.Get(dhcp6.OptIAAddr)
+	if len(iaOpt.Data) != 24 { // RFC 9686 sends a bare IA Address; sub-options are not echoed
+		return Valid{}, ReasonIAAddr
+	}
 	ia, err := dhcp6.ParseIAAddress(iaOpt.Data)
 	if err != nil {
 		return Valid{}, ReasonIAAddr

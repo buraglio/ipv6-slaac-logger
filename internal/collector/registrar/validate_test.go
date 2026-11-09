@@ -15,6 +15,7 @@ func TestValidate(t *testing.T) {
 	outside := netip.MustParseAddr("2001:db9::5")
 	ll := netip.MustParseAddr("fe80::1")
 	mapped := netip.MustParseAddr("::ffff:192.0.2.1")
+	subOpt := append(append([]byte{}, iaOpt.Data...), 0, 13, 0, 0)
 
 	notInform := inform(t, testAddr, testDUID, 7200)
 	notInform.Type = dhcp6.MsgInformationRequest
@@ -37,6 +38,7 @@ func TestValidate(t *testing.T) {
 		{"no ia", mcastReq(without(good, dhcp6.OptIAAddr), testAddr), ReasonIAAddr},
 		{"two ia", mcastReq(with(good, iaOpt), testAddr), ReasonIAAddr},
 		{"malformed ia", mcastReq(with(without(good, dhcp6.OptIAAddr), dhcp6.Option{Code: dhcp6.OptIAAddr, Data: []byte{1, 2, 3}}), testAddr), ReasonIAAddr},
+		{"ia with sub-options", mcastReq(with(without(good, dhcp6.OptIAAddr), dhcp6.Option{Code: dhcp6.OptIAAddr, Data: subOpt}), testAddr), ReasonIAAddr},
 		{"link-local", mcastReq(inform(t, ll, testDUID, 7200), ll), ReasonScope},
 		{"v4-mapped", mcastReq(inform(t, mapped, testDUID, 7200), mapped), ReasonScope},
 		{"source mismatch", mcastReq(good, other), ReasonSourceMismatch},
