@@ -86,7 +86,7 @@ Each record is JSON, emitted with an `@cee:` prefix so rsyslog's `mmjsonparse` c
 
 | Field | Values |
 |---|---|
-| `mac_src` | `duid` (from a DUID-LL/LLT), `cllao` (relay option 79), `l2` (Ethernet source on the collector's link), `nd` (matched from a sniffer sighting), `vendor` (agent-reported in Vendor Class) |
+| `mac_src` | `duid` (from a DUID-LL/LLT), `cllao` (relay option 79), `l2` (Ethernet source on the collector's link; **reserved, not implemented in v1**: the UDP listener can't see Ethernet source addresses), `nd` (matched from a sniffer sighting), `vendor` (agent-reported in Vendor Class). When several sources are available, precedence is `cllao` > `vendor` > `nd` > `duid`. A MAC observed on the wire beats the MAC embedded in a DUID, which often belongs to another interface. |
 | `origin` | `native`, `agent`, `sniffer`. **Advisory**: the agent marks itself with a Vendor Class option, which anyone can spoof. |
 | `via` | `multicast`, `unicast`, `relay`, `sniff` |
 | `host` | From the FQDN option (39) when present |
@@ -113,7 +113,7 @@ Each OS has its own implementation behind one Go interface. It returns `{addr, i
 | OS | Listing and origin | Change notification |
 |---|---|---|
 | Linux | netlink `RTM_GETADDR`. `IFA_PROTO` (kernel ≥5.18, `kernel_ra` = SLAAC), `IFA_F_TEMPORARY` and `IFA_F_PERMANENT`. On older kernels, a /128 with finite lifetimes is treated as DHCPv6. | netlink address multicast group |
-| macOS | `SIOCGIFAFLAG_IN6` (`AUTOCONF`, `TEMPORARY`, `DYNAMIC` = DHCPv6, `TENTATIVE`, `DUPLICATED`) and `SIOCGIFALIFETIME_IN6`, via `x/sys/unix`, no cgo | `PF_ROUTE` socket (`RTM_NEWADDR`, `RTM_DELADDR`) |
+| macOS | `SIOCGIFAFLAG_IN6` (`AUTOCONF`, `TEMPORARY`, `DYNAMIC` = DHCPv6, `TENTATIVE`, `DUPLICATED`) and `SIOCGIFALIFETIME_IN6`, via `x/sys/unix`, no cgo. `ia6t_expire`/`ia6t_preferred` are wall-clock Unix seconds (`0` = infinite), so remaining = expire − now (verified on macOS 26). If the lifetime ioctl fails, the address is treated as infinite and refreshed at the heartbeat. | `PF_ROUTE` socket (`RTM_NEWADDR`, `RTM_DELADDR`) |
 | Windows | `GetAdaptersAddresses`: `PrefixOrigin`, `SuffixOrigin`, lifetimes, `DadState` | `NotifyUnicastIpAddressChange` |
 
 A full re-scan runs every 5 minutes as a safety net. If notifications fail, the agent falls back to polling.
@@ -129,7 +129,7 @@ The agent chooses its DUID in this order:
 2. The OS's own DUID, so records correlate with DHCPv6 server logs:
    - Windows: `HKLM\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters\Dhcpv6DUID`
    - macOS: `/var/db/dhcpclient/DUID_IA.plist`
-   - Linux: dhclient or NetworkManager lease files, or systemd-networkd's machine-id-derived DUID
+   - Linux (v1): dhclient's `default-duid` only (`/var/lib/dhcp/dhclient6.leases`, then `/var/lib/dhclient/dhclient6.leases`). **Not read in v1:** systemd-networkd's machine-id-derived DUID and NetworkManager's internal DHCP client. On those hosts the agent's DUID won't match the OS DHCPv6 client's DUID. Set `duid` in the agent config to force a match.
 3. A generated **DUID-LLT** from the first hardware MAC, saved in the agent's state file.
 
 The DUID must stay stable across MAC randomization and restarts. If the state file is corrupt, it is backed up before any regeneration, and the regeneration is logged loudly.
@@ -231,7 +231,9 @@ The rules are applied strictly, following RFC 9686 §5:
 
 ### 5.5 Sniffer
 
-- Uses `AF_PACKET` via `mdlayher/packet` with a kernel BPF filter (`x/net/bpf`) for ICMPv6 types 133–136. Pure Go, no libpcap.
+- Uses a raw `AF_PACKET` socket opened with `x/sys/unix`, with a kernel BPF filter (`x/net/bpf`) for ICMPv6 types 133–136. Pure Go, no libpcap. `mdlayher/packet` is **not** used: Linux usually strips the 802.1Q tag into socket metadata before delivery, and reading it back needs `PACKET_AUXDATA` control messages, which that library doesn't expose.
+- The interface is put in promiscuous mode (`PACKET_MR_PROMISC`) so solicited-node multicast and SPAN traffic are delivered. Outgoing frames are kept, so a collector that is also the router sees its own RAs.
+- The BPF filter drops ND packets carrying IPv6 extension headers. ND never uses them, so this is an accepted loss.
 - Reads 802.1Q tags so it works on trunk and SPAN ports. Sightings record the interface and VLAN.
 - **Deployment note:** with MLD snooping enabled on switches, an access port misses most DAD and solicited-node traffic. On managed networks a SPAN/mirror port or trunk is required.
 
@@ -245,7 +247,15 @@ The rules are applied strictly, following RFC 9686 §5:
 
 - Sightings are collapsed in memory per (MAC, address, link). The database is written at most every 5 minutes per key. `nd.expire` fires after 24 h idle (configurable).
 - Link-local sightings go to the **database only** by default (`log_link_local = false`).
-- Any MAC seen with more than N addresses (configurable, default 32) is marked `proxy_suspect`, so routers doing proxy ND don't produce misleading host records.
+- Any MAC seen with more than N addresses on one link and VLAN (configurable, default 32) is marked `proxy_suspect`, so routers doing proxy ND don't produce misleading host records. From then on that MAC produces no `nd.*` events, and the `hosts` view and the registrar's MAC lookup ignore it. Its sightings are still stored.
+- **Flood limits** (defaults, configurable):
+  - At most `max_entries = 100000` live (MAC, address, link, VLAN) keys. New keys beyond that are dropped and counted in `sniff_overflow`.
+  - `nd.new` and `nd.conflict` events share a token bucket of 20/s with a burst of 200. Beyond it the sighting is still stored but no event is written, counted in `nd_suppressed`.
+  - `nd.expire` is never rate-limited.
+  - Both counters appear in the `stats` event.
+- An `nd.conflict` (a new MAC for an address that already has a different live MAC) is emitted instead of `nd.new` and carries `prev_mac`. Both sightings stay live.
+- `ra.seen` fires for a new router (link, VLAN, MAC, link-local address). `ra.change` fires when its M flag, O flag or prefix set changes. A change in router lifetime alone is stored but not logged.
+- **Not covered:** a host that never sends ND traffic the sniffer can see (for example, behind MLD snooping on an access port) produces no sightings. The sniffer runs on Linux only.
 
 ### 5.6 Store
 
@@ -293,7 +303,7 @@ The rules are applied strictly, following RFC 9686 §5:
 | Registrar | Table tests for every rejection rule, conflicts, rate limits, relay unwrap, expiry |
 | Agent address origin | Unit tests with fake OS data. Real runs on GitHub's Ubuntu, macOS and Windows runners check that loopback and link-local are excluded and that origin classification is sane. |
 | End-to-end (Linux) | Network namespaces with virtual Ethernet pairs and `radvd`. The agent gets SLAAC addresses, and the collector must record bindings, ND sightings and the expected syslog lines. Covers the multicast, unicast and relay paths. |
-| Interop | Agent → Kea ≥2.7.7 (ISC packages or Docker image), checking the registered lease. A manual Android test procedure is documented. |
+| Interop | Agent → Kea 3.0 stable (ISC packages), checking the registered lease. Kea 3.0 includes the RFC 9686 server side from 2.7.7. It has no `allow-address-registration` key (added in 3.1.4, where it defaults to on), so the test config omits it. A manual Android test procedure is documented. |
 | Negative | `cmd/regsend` sends malformed and spoofed registrations, which must produce the expected `reg.reject` events |
 
 ## 8. Repository layout
@@ -331,6 +341,6 @@ testdata/  docs/
 ## 10. Open items to verify during implementation
 
 1. **Port 546.** How do Kea and native stacks reply when the ADDR-REG-INFORM source port isn't 546? Can the agent bind 546 next to the OS DHCPv6 client on macOS (`configd`) and Windows (the DHCP service)?
-2. **Linux DUID sources.** Settle which DUID sources (networkd, NetworkManager, dhclient) are reliable enough to read, versus always generating one.
+2. **Linux DUID sources.** *Decided 2026-11-09:* v1 reads dhclient's `default-duid` only. networkd and NetworkManager are deferred. Otherwise the agent generates a DUID-LLT and saves it (§4.2).
 3. **Vendor Class options.** Confirm that Kea accepts ADDR-REG-INFORM messages carrying Vendor Class (16) and FQDN (39).
 4. **PEN.** Replace 32473 with a real IANA PEN before production.
