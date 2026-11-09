@@ -131,7 +131,42 @@ func (l *lineLog) waitFor(t *testing.T, timeout time.Duration, subs ...string) s
 	return ""
 }
 
-func startCollector(t *testing.T, state string) (*exec.Cmd, *lineLog) {
+// collectorProc is a running collector and its captured output.
+type collectorProc struct {
+	cmd            *exec.Cmd
+	stdout, stderr *lineLog
+	done           chan struct{} // closed when the process has exited
+}
+
+// stop sends SIGTERM and waits up to 10s for exit, then kills the process.
+func (c *collectorProc) stop(t *testing.T) {
+	t.Helper()
+	select {
+	case <-c.done:
+		return
+	default:
+	}
+	_ = c.cmd.Process.Signal(syscall.SIGTERM)
+	select {
+	case <-c.done:
+	case <-time.After(10 * time.Second):
+		t.Logf("collector did not exit within 10s of SIGTERM; killing it")
+		_ = c.cmd.Process.Kill()
+		<-c.done
+	}
+}
+
+func (l *lineLog) dump(t *testing.T, name string) {
+	t.Helper()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	t.Logf("collector %s (%d lines):\n%s", name, len(l.lines), strings.Join(l.lines, "\n"))
+	if len(l.buf) > 0 {
+		t.Logf("collector %s (partial line): %s", name, l.buf)
+	}
+}
+
+func startCollector(t *testing.T, state string) *collectorProc {
 	t.Helper()
 	cfg := fmt.Sprintf(`state_dir = %q
 listen_addr = "[::]:547"
@@ -150,20 +185,26 @@ type = "stdout"
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	stdout, stderr := &lineLog{}, &lineLog{}
-	cmd := exec.Command("ip", "netns", "exec", "ral-c", filepath.Join(binDir, "collector"), "run", "-config", cfgPath)
-	cmd.Stdout, cmd.Stderr = stdout, stderr
-	if err := cmd.Start(); err != nil {
+	c := &collectorProc{stdout: &lineLog{}, stderr: &lineLog{}, done: make(chan struct{})}
+	c.cmd = exec.Command("ip", "netns", "exec", "ral-c", filepath.Join(binDir, "collector"), "run", "-config", cfgPath)
+	c.cmd.Stdout, c.cmd.Stderr = c.stdout, c.stderr
+	if err := c.cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	go func() {
+		_ = c.cmd.Wait()
+		close(c.done)
+	}()
+	// Cleanups run last-in first-out: stop the collector, then dump its output.
 	t.Cleanup(func() {
-		if cmd.ProcessState == nil {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
+		if t.Failed() {
+			c.stdout.dump(t, "stdout")
+			c.stderr.dump(t, "stderr")
 		}
 	})
-	stderr.waitFor(t, 5*time.Second, "collector started")
-	return cmd, stdout
+	t.Cleanup(func() { c.stop(t) })
+	c.stderr.waitFor(t, 5*time.Second, "collector started")
+	return c
 }
 
 func regsend(args ...string) (string, int) {
@@ -196,7 +237,8 @@ func regsendExpect(t *testing.T, want int, args ...string) string {
 func TestCollectorEndToEnd(t *testing.T) {
 	setupNetns(t)
 	state := t.TempDir()
-	cmd, stdout := startCollector(t, state)
+	c := startCollector(t, state)
+	stdout := c.stdout
 
 	t.Run("multicast registration", func(t *testing.T) {
 		out := regsendExpect(t, 0, "-iface", "veth-h", "-addr", "2001:db8:10::100", "-agent", "-host", "h1.example.com")
@@ -225,8 +267,7 @@ func TestCollectorEndToEnd(t *testing.T) {
 	})
 
 	t.Run("query finds the binding", func(t *testing.T) {
-		_ = cmd.Process.Signal(syscall.SIGTERM)
-		_ = cmd.Wait()
+		c.stop(t)
 		out := sh(t, filepath.Join(binDir, "collector"), "query", "-db", filepath.Join(state, "ra-logger.db"), "-addr", "2001:db8:10::100")
 		if !strings.Contains(out, "reg.add") || !strings.Contains(out, "2001:db8:10::100") {
 			t.Fatalf("query output:\n%s", out)

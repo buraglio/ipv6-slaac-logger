@@ -68,4 +68,4 @@ jobs:
           CGO_ENABLED=0 go build -o bin/regsend ./cmd/regsend
           go test -c -tags e2e -o bin/e2e.test ./test/e2e
       - name: Run end-to-end tests in network namespaces
-        run: sudo RAL_BIN_DIR="$PWD/bin" ./bin/e2e.test -test.v
+        run: sudo RAL_BIN_DIR="$PWD/bin" ./bin/e2e.test -test.v -test.timeout=5m
