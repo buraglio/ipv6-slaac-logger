@@ -81,3 +81,61 @@ func TestQueryCmd(t *testing.T) {
 		t.Fatal("expected error with two lookup keys")
 	}
 }
+
+func TestQueryHolderFromCurrentBindingAfterPurge(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "q.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	// The reg.add is past retention: only the (long-refreshed) binding remains.
+	b := store.Binding{Addr: netip.MustParseAddr("2001:db8:10::5"), DUID: "00:03:00:01:5c:1e:9a:3b:21:aa", MAC: "5c:1e:9a:3b:21:aa",
+		Host: "h.example", Via: "multicast", Link: "eth0", FirstSeen: t0, LastSeen: t0.Add(500 * 24 * time.Hour),
+		ExpiresAt: t0.Add(501 * 24 * time.Hour)}
+	if err := st.Commit(context.Background(), store.Change{Put: []store.Binding{b}}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	at := t0.Add(24 * time.Hour).Format(time.RFC3339)
+
+	var out bytes.Buffer
+	if err := queryCmd([]string{"-db", path, "-addr", "2001:db8:10::5", "-at", at, "-json"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	var res struct {
+		Holder struct {
+			Held   bool      `json:"held"`
+			DUID   string    `json:"duid"`
+			MAC    string    `json:"mac"`
+			Host   string    `json:"host"`
+			Since  time.Time `json:"since"`
+			Source string    `json:"source"`
+		} `json:"holder"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	h := res.Holder
+	if !h.Held || h.Source != "current_binding" || h.DUID != b.DUID || h.MAC != b.MAC || h.Host != b.Host || !h.Since.Equal(t0) {
+		t.Fatalf("holder = %+v\n%s", h, out.String())
+	}
+
+	out.Reset()
+	if err := queryCmd([]string{"-db", path, "-addr", "2001:db8:10::5", "-at", at}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "(from current binding; earlier events may be past retention)") {
+		t.Fatalf("text output lacks the current-binding note:\n%s", out.String())
+	}
+
+	out.Reset()
+	before := t0.Add(-time.Hour).Format(time.RFC3339)
+	if err := queryCmd([]string{"-db", path, "-addr", "2001:db8:10::5", "-at", before, "-json"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	res.Holder.Held = true
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil || res.Holder.Held {
+		t.Fatalf("-at before first_seen: %s (%v)", out.String(), err)
+	}
+}

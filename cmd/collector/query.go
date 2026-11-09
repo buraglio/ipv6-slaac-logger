@@ -27,6 +27,10 @@ type holderOut struct {
 	MAC   string    `json:"mac,omitempty"`
 	Host  string    `json:"host,omitempty"`
 	Since time.Time `json:"since,omitzero"`
+	// Source is "events" when the answer comes from event history, or
+	// "current_binding" when the events are gone (past retention) and the
+	// still-live binding shows the address has been held since FirstSeen.
+	Source string `json:"source"`
 }
 
 type queryResult struct {
@@ -95,7 +99,19 @@ func queryCmd(args []string, w io.Writer) error {
 			return err
 		}
 		h, held := query.HolderAt(all, at)
-		res.Holder = &holderOut{At: at, Held: held, DUID: h.DUID, MAC: h.MAC, Host: h.Host, Since: h.Since}
+		res.Holder = &holderOut{At: at, Held: held, DUID: h.DUID, MAC: h.MAC, Host: h.Host, Since: h.Since, Source: "events"}
+		if !held {
+			// The binding keeps FirstSeen across refreshes, so a live binding
+			// first seen by -at has held the address continuously since then,
+			// even when its reg.add has been purged by retention.
+			for _, b := range bs {
+				if !b.FirstSeen.After(at) && at.Before(b.ExpiresAt) {
+					res.Holder = &holderOut{At: at, Held: true, DUID: b.DUID, MAC: b.MAC, Host: b.Host,
+						Since: b.FirstSeen, Source: "current_binding"}
+					break
+				}
+			}
+		}
 	}
 	if *asJSON {
 		enc := json.NewEncoder(w)
@@ -188,7 +204,11 @@ func writeText(w io.Writer, res queryResult) error {
 	if h := res.Holder; h != nil {
 		fmt.Fprintln(tw)
 		if h.Held {
-			fmt.Fprintf(tw, "Holder at %s: duid=%s mac=%s host=%s since=%s\n", ts(h.At), h.DUID, dash(h.MAC), dash(h.Host), ts(h.Since))
+			note := ""
+			if h.Source == "current_binding" {
+				note = " (from current binding; earlier events may be past retention)"
+			}
+			fmt.Fprintf(tw, "Holder at %s: duid=%s mac=%s host=%s since=%s%s\n", ts(h.At), h.DUID, dash(h.MAC), dash(h.Host), ts(h.Since), note)
 		} else {
 			fmt.Fprintf(tw, "No holder at %s\n", ts(h.At))
 		}
