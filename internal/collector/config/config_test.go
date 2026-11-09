@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func write(t *testing.T, body string) string {
@@ -80,5 +81,31 @@ func TestRetentionDaysZeroRejected(t *testing.T) {
 	}
 	if _, err := Load(write(t, "retention_days = -3\n")); err == nil {
 		t.Fatal("negative retention_days accepted")
+	}
+}
+
+func TestSnifferDefaultsAndLimits(t *testing.T) {
+	c, err := Load(write(t, "[[interface]]\nname=\"eth0\"\nroles=[\"sniff\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Sniffer.Idle() != 24*time.Hour || c.Sniffer.LogLinkLocal || c.Sniffer.ProxyThreshold != 32 || c.Sniffer.MaxEntries != 100000 {
+		t.Fatalf("sniffer defaults = %+v", c.Sniffer)
+	}
+	c, err = Load(write(t, "[sniffer]\nidle_timeout=\"90m\"\nlog_link_local=true\nproxy_threshold=2\nmax_entries=100\n"))
+	if err != nil || c.Sniffer.Idle() != 90*time.Minute || !c.Sniffer.LogLinkLocal {
+		t.Fatalf("explicit sniffer = %+v %v", c.Sniffer, err)
+	}
+	for name, body := range map[string]string{
+		"idle too short":   "[sniffer]\nidle_timeout=\"30s\"\n",
+		"idle unparsable":  "[sniffer]\nidle_timeout=\"soon\"\n",
+		"threshold 1":      "[sniffer]\nproxy_threshold=1\n",
+		"threshold 0":      "[sniffer]\nproxy_threshold=0\n",
+		"max_entries 99":   "[sniffer]\nmax_entries=99\n",
+		"max_entries zero": "[sniffer]\nmax_entries=0\n",
+	} {
+		if _, err := Load(write(t, body)); err == nil {
+			t.Errorf("%s: expected error", name)
+		}
 	}
 }

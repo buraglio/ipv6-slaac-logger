@@ -7,7 +7,13 @@ retention_days = 400
 #   listen    - join ff02::1:2 and accept RFC 9686 registrations
 #   responder - answer Information-Request with option 148 (only on links
 #               with NO other DHCPv6 server; the router's RA needs the O flag)
-#   sniff     - passive ND/RA sniffer (not implemented in this build)
+#   sniff     - passive ND/RA sniffer: records MAC <-> address sightings and
+#               routers from NDP traffic (Linux only; needs CAP_NET_RAW; puts
+#               the interface in promiscuous mode). The interface may appear
+#               after start-up; opening is retried with backoff.
+#               Deployment: with MLD snooping on the switches an access port
+#               misses most DAD and solicited-node traffic. On managed
+#               networks use a SPAN/mirror port or a trunk.
 [[interface]]
 name  = "eth0"
 roles = ["listen"]
@@ -18,6 +24,21 @@ roles = ["listen"]
 allowed_prefixes = []   # required for direct unicast registrations; empty = deny
 relay_prefixes   = []   # prefixes reachable through DHCPv6 relays
 trusted_relays   = []   # source prefixes of DHCPv6 relay agents allowed to forward registrations; empty = accept no relayed registrations
+
+# Sniffer tuning (only used by interfaces with the "sniff" role). Every key
+# is optional; the values shown are the defaults.
+# [sniffer]
+# idle_timeout    = "24h"   # min "1m". A sighting not seen for this long is expired and an nd.expire event is logged.
+# log_link_local  = false   # false: link-local (fe80::/10) sightings go to the database only, with no nd.* events.
+# proxy_threshold = 32      # min 2. A MAC seen with MORE than this many addresses on one link+VLAN is marked
+#                           # proxy_suspect (a proxy-ND router, say): it gets no further nd.* events and is
+#                           # ignored by the hosts view and the registrar's MAC lookup. Its sightings are still stored.
+# max_entries     = 100000  # min 100. Cap on live (MAC, address, link, VLAN) sightings held in memory. Beyond it
+#                           # new sightings are dropped and counted in the stats counter sniff_overflow.
+#
+# Not configurable: nd.new/nd.conflict events are capped at 20/s (burst 200).
+# Over the cap the sighting is still stored but no event is logged (stats
+# counter nd_suppressed). nd.expire is never capped.
 
 [vendor]
 enterprise_number = 32473   # RFC 5612 documentation PEN - replace before production

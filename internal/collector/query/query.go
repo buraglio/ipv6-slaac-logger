@@ -2,6 +2,7 @@
 package query
 
 import (
+	"slices"
 	"time"
 
 	"github.com/buraglio/ipv6-ra-logger/internal/collector/registrar"
@@ -78,4 +79,55 @@ func expiryOf(e event.Event) time.Time {
 		return e.LastSeen.Add(registrar.InfiniteTTL)
 	}
 	return e.LastSeen.Add(time.Duration(*e.Valid) * time.Second)
+}
+
+// SightedAt returns the MACs the sniffer saw using the queried address at time
+// at, sorted and deduplicated. A MAC counts when an nd.new/nd.conflict ->
+// nd.expire window from events covers at (the window ends at the expire's
+// LastSeen, the last real sighting, not at the sweep time that stamped the
+// event), or when a live sighting's [FirstSeen, LastSeen] covers at. events
+// must be ordered by time. MACs with a proxy-suspect sighting are excluded.
+func SightedAt(events []store.StoredEvent, current []store.Sighting, at time.Time) []string {
+	suspect := map[string]bool{}
+	set := map[string]bool{}
+	for _, s := range current {
+		if s.ProxySuspect {
+			suspect[s.MAC] = true
+			continue
+		}
+		if !s.Expired && !s.FirstSeen.After(at) && !s.LastSeen.Before(at) {
+			set[s.MAC] = true
+		}
+	}
+	open := map[string]time.Time{} // MAC -> start of its open window
+	for _, se := range events {
+		e := se.Event
+		switch e.Type {
+		case event.NDNew, event.NDConflict:
+			if _, ok := open[e.MAC]; !ok {
+				open[e.MAC] = e.TS
+			}
+		case event.NDExpire:
+			start, ok := open[e.MAC]
+			if !ok {
+				continue
+			}
+			delete(open, e.MAC)
+			end := e.TS
+			if e.LastSeen != nil {
+				end = *e.LastSeen
+			}
+			if !start.After(at) && !end.Before(at) {
+				set[e.MAC] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(set))
+	for m := range set {
+		if !suspect[m] {
+			out = append(out, m)
+		}
+	}
+	slices.Sort(out)
+	return out
 }

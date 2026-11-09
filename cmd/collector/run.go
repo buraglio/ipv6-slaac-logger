@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/buraglio/ipv6-ra-logger/internal/collector/registrar"
 	"github.com/buraglio/ipv6-ra-logger/internal/collector/responder"
 	"github.com/buraglio/ipv6-ra-logger/internal/collector/serverid"
+	"github.com/buraglio/ipv6-ra-logger/internal/collector/sniffer"
 	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
 	"github.com/buraglio/ipv6-ra-logger/internal/event"
 )
@@ -62,6 +64,7 @@ func run(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func(n
 
 	static := map[string][]netip.Prefix{}
 	var listenIfaces []string
+	var sniffIfaces []string
 	respIfaces := map[int]bool{}
 	listenIdx := map[int]bool{}
 	for _, ifc := range cfg.Interfaces {
@@ -86,7 +89,8 @@ func run(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func(n
 			respIfaces[ifi.Index] = true
 		}
 		if ifc.Has(config.RoleSniff) {
-			log.Warn("role \"sniff\" is not implemented in this build; ignoring", "iface", ifc.Name)
+			// The interface may not exist yet: each Sniffer retries its own open.
+			sniffIfaces = append(sniffIfaces, ifc.Name)
 		}
 	}
 	allowed, err := config.ParsePrefixes(cfg.Registrar.AllowedPrefixes)
@@ -107,6 +111,27 @@ func run(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func(n
 	}
 	reg := registrar.New(st, rec, &registrar.PrefixPolicy{OnLink: onLink.For, Relay: relay, Unicast: allowed}, sid, cfg.Vendor.EnterpriseNumber)
 	reg.Log = log
+
+	tcfg := sniffer.DefaultTrackerConfig()
+	tcfg.Idle, tcfg.LogLinkLocal = cfg.Sniffer.Idle(), cfg.Sniffer.LogLinkLocal
+	tcfg.ProxyThreshold, tcfg.MaxEntries = cfg.Sniffer.ProxyThreshold, cfg.Sniffer.MaxEntries
+	tracker := sniffer.NewTracker(tcfg, rec, time.Now, log)
+	ramon := sniffer.NewRAMonitor(rec, tcfg.Flush, time.Now, log)
+	sightings, err := st.Sightings(ctx, false)
+	if err != nil {
+		return err
+	}
+	tracker.Load(sightings)
+	routers, err := st.Routers(ctx)
+	if err != nil {
+		return err
+	}
+	ramon.Load(routers)
+	reg.Sightings = tracker
+	sniffers := make([]*sniffer.Sniffer, len(sniffIfaces))
+	for i, name := range sniffIfaces {
+		sniffers[i] = &sniffer.Sniffer{Link: name, Tracker: tracker, RA: ramon, Log: log}
+	}
 	disp := &listener.Dispatcher{Reg: reg, Log: log, TrustedRelays: trusted, ListenIfaces: listenIdx}
 	if len(respIfaces) > 0 {
 		disp.Resp = &responder.Responder{ServerID: sid}
@@ -126,22 +151,47 @@ func run(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func(n
 		f := &logger.Forwarder{Name: cursors[i], Src: st, Sink: s, Log: log}
 		wg.Go(func() { f.Run(ctx) })
 	}
+	for _, sn := range sniffers {
+		wg.Go(func() { sn.Run(ctx) })
+	}
 	wg.Go(func() { periodic(ctx, time.Minute, func() { reg.Sweep(ctx) }) })
 	wg.Go(func() {
+		periodic(ctx, 30*time.Second, func() {
+			tracker.Tick(ctx)
+			ramon.Tick(ctx)
+		})
+	})
+	wg.Go(func() {
 		periodic(ctx, 24*time.Hour, func() {
-			n, err := st.PurgeEventsBefore(ctx, time.Now().AddDate(0, 0, -cfg.RetentionDays))
+			cutoff := time.Now().AddDate(0, 0, -cfg.RetentionDays)
+			n, err := st.PurgeEventsBefore(ctx, cutoff)
 			if err != nil {
 				log.Error("retention sweep failed", "err", err)
 				return
 			}
-			log.Info("retention sweep", "purged", n)
+			stale, err := st.PurgeStaleBefore(ctx, cutoff)
+			if err != nil {
+				log.Error("retention sweep failed", "err", err)
+				return
+			}
+			log.Info("retention sweep", "purged", n, "purged_sightings", stale)
 		})
 	})
 	wg.Go(func() {
 		periodic(ctx, 15*time.Minute, func() {
 			e := event.New(event.Stats, time.Now())
-			e.Counters = reg.Stats.Snapshot()
-			e.Counters["dropped"] = disp.Dropped.Load()
+			var sc []map[string]uint64
+			for _, sn := range sniffers {
+				sc = append(sc, sn.Counters())
+			}
+			var dup []string
+			e.Counters, dup = mergeCounters(
+				reg.Stats.Snapshot(),
+				map[string]uint64{"dropped": disp.Dropped.Load()},
+				tracker.Counters(), ramon.Counters(), sumCounters(sc...))
+			if len(dup) > 0 {
+				log.Error("stats counter name collision", "names", dup)
+			}
 			_ = rec.Record(ctx, store.Change{Events: []event.Event{e}})
 		})
 	})
@@ -195,6 +245,35 @@ func buildSinks(lc config.Log, fac logger.Facility) ([]logger.Sink, []string, er
 		cursors = append(cursors, o.Type+":"+o.Address)
 	}
 	return sinks, cursors, nil
+}
+
+// sumCounters adds counter maps that share names, as the per-interface
+// sniffers' do.
+func sumCounters(ms ...map[string]uint64) map[string]uint64 {
+	out := map[string]uint64{}
+	for _, m := range ms {
+		for k, v := range m {
+			out[k] += v
+		}
+	}
+	return out
+}
+
+// mergeCounters combines the counter maps of distinct components into one map.
+// A name present in more than one map is a bug: the later value wins and the
+// name is returned in dup so the caller can report it.
+func mergeCounters(ms ...map[string]uint64) (out map[string]uint64, dup []string) {
+	out = map[string]uint64{}
+	for _, m := range ms {
+		for k, v := range m {
+			if _, ok := out[k]; ok {
+				dup = append(dup, k)
+			}
+			out[k] = v
+		}
+	}
+	slices.Sort(dup)
+	return out, dup
 }
 
 func periodic(ctx context.Context, every time.Duration, fn func()) {

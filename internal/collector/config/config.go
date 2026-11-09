@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 
@@ -32,6 +33,7 @@ type Config struct {
 	Interfaces    []Interface `toml:"interface"`
 	Registrar     Registrar   `toml:"registrar"`
 	Vendor        Vendor      `toml:"vendor"`
+	Sniffer       Sniffer     `toml:"sniffer"`
 	Log           Log         `toml:"log"`
 }
 
@@ -48,6 +50,20 @@ type Registrar struct {
 	AllowedPrefixes []string `toml:"allowed_prefixes"`
 	RelayPrefixes   []string `toml:"relay_prefixes"`
 	TrustedRelays   []string `toml:"trusted_relays"` // IPv6 prefixes of relay agents whose Relay-Forward messages are accepted; empty = none
+}
+
+// Sniffer tunes the passive ND/RA sniffer (interfaces with the sniff role).
+type Sniffer struct {
+	IdleTimeout    string `toml:"idle_timeout"`    // default "24h", min 1m
+	LogLinkLocal   bool   `toml:"log_link_local"`  // default false
+	ProxyThreshold int    `toml:"proxy_threshold"` // default 32, min 2
+	MaxEntries     int    `toml:"max_entries"`     // default 100000, min 100
+}
+
+// Idle returns IdleTimeout as a duration (0 if it does not parse).
+func (s Sniffer) Idle() time.Duration {
+	d, _ := time.ParseDuration(s.IdleTimeout)
+	return d
 }
 
 type Vendor struct {
@@ -82,6 +98,12 @@ func Load(path string) (*Config, error) {
 		}
 		return nil, fmt.Errorf("config: unknown keys: %s", strings.Join(keys, ", "))
 	}
+	if md.IsDefined("sniffer", "proxy_threshold") && c.Sniffer.ProxyThreshold == 0 {
+		return nil, errors.New("config: sniffer.proxy_threshold must be at least 2")
+	}
+	if md.IsDefined("sniffer", "max_entries") && c.Sniffer.MaxEntries == 0 {
+		return nil, errors.New("config: sniffer.max_entries must be at least 100")
+	}
 	// An explicit 0 is an error, not "use the default": it would otherwise
 	// silently mean 400 days to someone who asked for no retention.
 	if md.IsDefined("retention_days") && c.RetentionDays < 1 {
@@ -103,6 +125,15 @@ func (c *Config) applyDefaults() {
 	}
 	if c.RetentionDays == 0 {
 		c.RetentionDays = 400
+	}
+	if c.Sniffer.IdleTimeout == "" {
+		c.Sniffer.IdleTimeout = "24h"
+	}
+	if c.Sniffer.ProxyThreshold == 0 {
+		c.Sniffer.ProxyThreshold = 32
+	}
+	if c.Sniffer.MaxEntries == 0 {
+		c.Sniffer.MaxEntries = 100000
 	}
 	if c.Vendor.EnterpriseNumber == 0 {
 		c.Vendor.EnterpriseNumber = 32473 // RFC 5612 documentation PEN; replace before production
@@ -160,6 +191,18 @@ func (c *Config) Validate() error {
 	}
 	if c.RetentionDays < 1 {
 		return errRetention
+	}
+	if _, err := time.ParseDuration(c.Sniffer.IdleTimeout); err != nil {
+		return fmt.Errorf("config: sniffer.idle_timeout: %w", err)
+	}
+	if c.Sniffer.Idle() < time.Minute {
+		return errors.New("config: sniffer.idle_timeout must be at least 1m")
+	}
+	if c.Sniffer.ProxyThreshold < 2 {
+		return errors.New("config: sniffer.proxy_threshold must be at least 2")
+	}
+	if c.Sniffer.MaxEntries < 100 {
+		return errors.New("config: sniffer.max_entries must be at least 100")
 	}
 	return nil
 }

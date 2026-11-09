@@ -446,3 +446,41 @@ func TestMulticastLinkChangeIsChange(t *testing.T) {
 		t.Fatalf("change event = %+v", ev)
 	}
 }
+
+type fakeLookup struct{ mac string }
+
+func (f fakeLookup) MACFor(netip.Addr) (string, bool) { return f.mac, f.mac != "" }
+
+// uuidDUID is a DUID-UUID (type 4): it embeds no MAC.
+var uuidDUID = append([]byte{0, 4}, bytes.Repeat([]byte{0x11}, 16)...)
+
+func TestMACFromSightingWhenNoOtherSource(t *testing.T) {
+	e := newEnv(t)
+	e.r.Sightings = fakeLookup{"aa:bb:cc:dd:ee:ff"}
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, uuidDUID, 7200), testAddr))
+	ev := e.events()[0]
+	if ev.MAC != "aa:bb:cc:dd:ee:ff" || ev.MACSrc != MACSrcND {
+		t.Fatalf("event = %+v", ev)
+	}
+	if b, _ := e.binding(testAddr); b.MAC != "aa:bb:cc:dd:ee:ff" || b.MACSrc != "nd" {
+		t.Fatalf("binding = %+v", b)
+	}
+}
+
+func TestVendorMACBeatsSighting(t *testing.T) {
+	e := newEnv(t)
+	e.r.Sightings = fakeLookup{"aa:bb:cc:dd:ee:ff"}
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, uuidDUID, 7200, agentOpts(t, 32473, "02:00:00:00:00:01")...), testAddr))
+	if ev := e.events()[0]; ev.MAC != "02:00:00:00:00:01" || ev.MACSrc != MACSrcVendor {
+		t.Fatalf("event = %+v", ev)
+	}
+}
+
+func TestSightingBeatsDUIDMAC(t *testing.T) {
+	e := newEnv(t)
+	e.r.Sightings = fakeLookup{"aa:bb:cc:dd:ee:ff"}
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 7200), testAddr))
+	if ev := e.events()[0]; ev.MAC != "aa:bb:cc:dd:ee:ff" || ev.MACSrc != MACSrcND {
+		t.Fatalf("event = %+v", ev)
+	}
+}

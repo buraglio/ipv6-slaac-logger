@@ -30,8 +30,14 @@ const (
 
 	MACSrcCLLAO  = "cllao"
 	MACSrcVendor = "vendor"
+	MACSrcND     = "nd" // MAC seen in ND traffic for the address (sniffer)
 	MACSrcDUID   = "duid"
 )
+
+// MACLookup finds the MAC the sniffer saw using an address (nil = disabled).
+type MACLookup interface {
+	MACFor(netip.Addr) (string, bool)
+}
 
 // BindingStore reads current bindings.
 type BindingStore interface {
@@ -70,6 +76,10 @@ type Registrar struct {
 	Now      func() time.Time
 	Log      *slog.Logger
 	Stats    Stats
+
+	// Sightings, if set, supplies a sniffed MAC for registrations that carry
+	// no CLLAO or agent-reported MAC. It outranks the MAC embedded in the DUID.
+	Sightings MACLookup
 
 	mu                sync.Mutex // serializes binding read-modify-write and expiry
 	rejectLog         *rate.Limiter
@@ -208,12 +218,15 @@ func (r *Registrar) bindingFor(req *Request, v Valid, now time.Time) store.Bindi
 		b.Origin = OriginAgent
 	}
 	// MAC precedence: relay-inserted CLLAO (observed by network gear), then the
-	// agent-reported current interface MAC, then the MAC embedded in the DUID.
+	// agent-reported current interface MAC, then a MAC the sniffer saw using the
+	// address, then the MAC embedded in the DUID.
 	switch {
 	case req.Relay != nil && len(req.Relay.CLLAO) == 6:
 		b.MAC, b.MACSrc = req.Relay.CLLAO.String(), MACSrcCLLAO
 	case isAgent && validMAC(info["mac"]) != "":
 		b.MAC, b.MACSrc = validMAC(info["mac"]), MACSrcVendor
+	case r.sightedMAC(v.IA.Addr) != "":
+		b.MAC, b.MACSrc = r.sightedMAC(v.IA.Addr), MACSrcND
 	default:
 		if mac, ok := dhcp6.MACFromDUID(v.DUID); ok {
 			b.MAC, b.MACSrc = mac.String(), MACSrcDUID
@@ -246,6 +259,16 @@ func (r *Registrar) agentInfo(m *dhcp6.Message) (map[string]string, bool) {
 	return kv, true
 }
 
+func (r *Registrar) sightedMAC(a netip.Addr) string {
+	if r.Sightings == nil {
+		return ""
+	}
+	if m, ok := r.Sightings.MACFor(a); ok {
+		return validMAC(m)
+	}
+	return ""
+}
+
 func validMAC(s string) string {
 	if s == "" {
 		return ""
@@ -261,8 +284,10 @@ func validMAC(s string) string {
 func macRank(src string) int {
 	switch src {
 	case MACSrcCLLAO:
-		return 3
+		return 4
 	case MACSrcVendor:
+		return 3
+	case MACSrcND:
 		return 2
 	case MACSrcDUID:
 		return 1
