@@ -12,7 +12,8 @@ var t0 = time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
 
 func TestKeyedBurstAndRefill(t *testing.T) {
 	k := newKeyed(rate.Limit(1), 2)
-	if !k.Allow("a", t0) || !k.Allow("a", t0) {
+	a1, a2 := k.Allow("a", t0), k.Allow("a", t0)
+	if !a1 || !a2 {
 		t.Fatal("burst of 2 not allowed")
 	}
 	if k.Allow("a", t0) {
