@@ -35,7 +35,10 @@ func Open(ifname string) (FrameSource, error) {
 	}
 
 	proto := htons(unix.ETH_P_ALL)
-	fd, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW|unix.SOCK_CLOEXEC, int(proto))
+	// Protocol 0 at socket(): a nonzero protocol makes the socket receive from
+	// every interface immediately, before the filter is attached and before bind.
+	// With 0 nothing is received until bind supplies the protocol and interface.
+	fd, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW|unix.SOCK_CLOEXEC, 0)
 	if err != nil {
 		return nil, fmt.Errorf("sniffer: socket: %w", err)
 	}

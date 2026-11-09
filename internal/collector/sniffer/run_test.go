@@ -140,3 +140,37 @@ func TestSnifferReopensAfterError(t *testing.T) {
 		t.Errorf("open calls = %d, want 3", calls)
 	}
 }
+
+type errSource struct{}
+
+func (errSource) ReadFrame([]byte) (int, uint16, error) { return 0, 0, os.ErrInvalid }
+func (errSource) Close() error                          { return nil }
+
+func TestSnifferReopensAfterReadError(t *testing.T) {
+	const n = 3
+	var mu sync.Mutex
+	calls := 0
+	open := func(string) (FrameSource, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if calls <= n {
+			return errSource{}, nil
+		}
+		return &fakeSource{}, nil
+	}
+	s, _, _, buf := newSniffer(t, open)
+	runFor(t, s, func() bool { return strings.Contains(buf.String(), "recovered") })
+	out := buf.String()
+	if c := strings.Count(out, "level=WARN"); c != 1 {
+		t.Errorf("Warn count = %d, want 1\n%s", c, out)
+	}
+	if c := strings.Count(out, "recovered"); c != 1 {
+		t.Errorf("recovered count = %d, want 1\n%s", c, out)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != n+1 {
+		t.Errorf("open calls = %d, want %d", calls, n+1)
+	}
+}
