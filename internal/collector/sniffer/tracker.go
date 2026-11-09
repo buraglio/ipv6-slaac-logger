@@ -64,6 +64,11 @@ type entry struct {
 	// expireEmitted is set once the nd.expire event was handed to Record, so
 	// retries after a recorder error write only the Expired row.
 	expireEmitted bool
+	// announced is set once an nd.new or nd.conflict for this window was
+	// handed to Record (warm-loaded rows count as announced). Only announced
+	// keys get an nd.expire, so a flood whose nd.new events were suppressed
+	// does not return as an unlimited burst of expiries.
+	announced bool
 }
 
 func (k key) macLV() macLV { return macLV{k.mac, k.link, k.vlan} }
@@ -128,18 +133,27 @@ func (t *Tracker) remove(k key) {
 	}
 }
 
-// checkProxy marks every key of m proxy-suspect once its count exceeds the threshold.
-func (t *Tracker) checkProxy(m macLV) {
-	if t.proxy[m] || len(t.byMAC[m]) <= t.cfg.ProxyThreshold {
-		return
-	}
+// markProxy flags every key of m proxy-suspect.
+func (t *Tracker) markProxy(m macLV) {
 	t.proxy[m] = true
 	for _, e := range t.byMAC[m] {
-		e.ProxySuspect = true
-		e.dirty = true
-		e.gen++
+		if !e.ProxySuspect {
+			e.ProxySuspect = true
+			e.dirty = true
+			e.gen++
+		}
 	}
+}
+
+// checkProxy marks every key of m proxy-suspect once its count exceeds the
+// threshold, and reports whether m crossed it just now.
+func (t *Tracker) checkProxy(m macLV) bool {
+	if t.proxy[m] || len(t.byMAC[m]) <= t.cfg.ProxyThreshold {
+		return false
+	}
+	t.markProxy(m)
 	t.log.Warn("proxy_suspect", "mac", m.mac, "link", m.link)
+	return true
 }
 
 // Load seeds the tracker from stored rows without emitting events.
@@ -159,13 +173,18 @@ func (t *Tracker) Load(rows []store.Sighting) {
 			t.overflow++
 			continue
 		}
-		t.add(k, &entry{Sighting: r, lastWrite: now})
+		t.add(k, &entry{Sighting: r, lastWrite: now, announced: true})
 		if r.ProxySuspect {
 			t.proxy[k.macLV()] = true
 		}
 	}
 	for m := range t.byMAC {
-		t.checkProxy(m)
+		if t.proxy[m] {
+			// One stored suspect row flags its live siblings too.
+			t.markProxy(m)
+		} else {
+			t.checkProxy(m)
+		}
 	}
 }
 
@@ -197,14 +216,16 @@ func (t *Tracker) Observe(ctx context.Context, o Observation) {
 		t.mu.Unlock()
 		return
 	}
+	// lastWrite = now: the row is written below, so a Tick racing with that
+	// write must not flush it again.
 	e := &entry{Sighting: store.Sighting{
 		MAC: k.mac, Addr: k.addr, Link: k.link, VLAN: k.vlan, Kind: o.Kind,
 		FirstSeen: now, LastSeen: now,
 		ProxySuspect: t.proxy[k.macLV()],
-	}}
+	}, lastWrite: now}
 	t.add(k, e)
 	t.sightings++
-	t.checkProxy(k.macLV())
+	crossed := t.checkProxy(k.macLV())
 
 	var ch store.Change
 	if !t.quiet(e) {
@@ -222,14 +243,30 @@ func (t *Tracker) Observe(ctx context.Context, o Observation) {
 			ev := t.newEvent(typ, e, now)
 			ev.PrevMAC = prev
 			ch.Events = append(ch.Events, ev)
+			e.announced = true
 		} else {
 			t.suppressed++
 		}
 	}
+	type pending struct {
+		k   key
+		e   *entry
+		gen uint64
+	}
+	written := []pending{{k, e, e.gen}}
 	ch.PutSightings = []store.Sighting{e.Sighting}
+	if crossed {
+		// Every row of the MAC carries the new proxy flag in this same Change.
+		for ok2, other := range t.byMAC[k.macLV()] {
+			if other != e {
+				ch.PutSightings = append(ch.PutSightings, other.Sighting)
+				written = append(written, pending{ok2, other, other.gen})
+			}
+		}
+	}
 	t.mu.Unlock()
 
-	// The event is handed to Record exactly once; on error only the row is
+	// The event is handed to Record exactly once; on error only the rows are
 	// retried (via the dirty flag), never the event.
 	err := t.rec.Record(ctx, ch)
 
@@ -237,13 +274,19 @@ func (t *Tracker) Observe(ctx context.Context, o Observation) {
 	defer t.mu.Unlock()
 	if err != nil {
 		t.log.Error("record sighting", "err", err)
-		if t.entries[k] == e {
-			e.dirty, e.lastWrite = true, time.Time{}
-		}
-		return
 	}
-	if t.entries[k] == e {
-		e.lastWrite = now
+	for _, p := range written {
+		if t.entries[p.k] != p.e {
+			continue
+		}
+		switch {
+		case err != nil:
+			p.e.dirty, p.e.lastWrite = true, time.Time{}
+		case p.e.gen == p.gen:
+			p.e.dirty, p.e.lastWrite = false, now
+		default:
+			p.e.lastWrite = now // changed meanwhile: still dirty
+		}
 	}
 }
 
@@ -261,7 +304,7 @@ func (t *Tracker) Tick(ctx context.Context) {
 	for k, e := range t.entries {
 		if now.Sub(e.LastSeen) >= t.cfg.Idle {
 			if !e.expireEmitted {
-				if !t.quiet(e) {
+				if e.announced && !t.quiet(e) {
 					ev := t.newEvent(event.NDExpire, e, now)
 					ev.FirstSeen, ev.LastSeen = event.TimePtr(e.FirstSeen), event.TimePtr(e.LastSeen)
 					ch.Events = append(ch.Events, ev)

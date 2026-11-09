@@ -22,11 +22,20 @@ type fakeRec struct {
 	calls   []store.Change // every Record call, including failed ones
 	err     error
 	delay   time.Duration
+	// hook, if set, runs once at the start of the next Record call.
+	hook func()
 }
 
 func (f *fakeRec) Record(_ context.Context, c store.Change) error {
 	if f.delay > 0 {
 		time.Sleep(f.delay)
+	}
+	f.mu.Lock()
+	hook := f.hook
+	f.hook = nil
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -374,5 +383,116 @@ func TestTrackerConcurrentObserve(t *testing.T) {
 	tr.mu.Unlock()
 	if got != want {
 		t.Fatalf("live = %d want %d", got, want)
+	}
+}
+
+func countType(evs []event.Event, typ string) int {
+	n := 0
+	for _, e := range evs {
+		if e.Type == typ {
+			n++
+		}
+	}
+	return n
+}
+
+// Keys whose nd.new was suppressed by the bucket must not come back as an
+// unlimited burst of nd.expire lines.
+func TestTrackerExpireOnlyAnnounced(t *testing.T) {
+	cfg := DefaultTrackerConfig()
+	cfg.EventBurst, cfg.EventRate, cfg.ProxyThreshold = 5, 0, 1000
+	tr, rec, clk, _ := newTestTracker(t, cfg)
+	ctx := context.Background()
+	for i := 1; i <= 20; i++ {
+		tr.Observe(ctx, obs(t, fmt.Sprintf("aa:bb:cc:00:00:%02x", i), fmt.Sprintf("2001:db8::%x", i)))
+	}
+	clk.t = clk.t.Add(24 * time.Hour)
+	tr.Tick(ctx)
+	if n := countType(rec.events(), event.NDExpire); n != 5 {
+		t.Fatalf("nd.expire = %d, want 5", n)
+	}
+	expiredRows := 0
+	for _, c := range rec.all() {
+		for _, r := range c.PutSightings {
+			if r.Expired {
+				expiredRows++
+			}
+		}
+	}
+	if expiredRows != 20 || len(tr.entries) != 0 {
+		t.Fatalf("expired rows = %d, live = %d", expiredRows, len(tr.entries))
+	}
+}
+
+// Warm-loaded rows were announced by the previous run, so they still expire
+// with an event.
+func TestTrackerWarmLoadedExpireLogged(t *testing.T) {
+	tr, rec, clk, _ := newTestTracker(t, DefaultTrackerConfig())
+	tr.Load([]store.Sighting{{MAC: "aa:bb:cc:00:00:01", Addr: netip.MustParseAddr("2001:db8::1"), Link: "eth0",
+		FirstSeen: clk.t, LastSeen: clk.t}})
+	clk.t = clk.t.Add(24 * time.Hour)
+	tr.Tick(context.Background())
+	if n := countType(rec.events(), event.NDExpire); n != 1 {
+		t.Fatalf("nd.expire = %d, want 1", n)
+	}
+}
+
+// The key that crosses the proxy threshold writes every row of that MAC as
+// proxy-suspect in its own Change, not five minutes later.
+func TestTrackerProxyFlagWrittenAtOnce(t *testing.T) {
+	tr, rec, clk, _ := newTestTracker(t, DefaultTrackerConfig())
+	ctx := context.Background()
+	for i := 1; i <= 33; i++ {
+		tr.Observe(ctx, obs(t, "aa:bb:cc:00:00:01", fmt.Sprintf("2001:db8::%x", i)))
+	}
+	cs := rec.all()
+	rows := cs[len(cs)-1].PutSightings
+	if len(cs) != 33 || len(rows) != 33 {
+		t.Fatalf("changes = %d, rows in crossing change = %d", len(cs), len(rows))
+	}
+	for _, r := range rows {
+		if !r.ProxySuspect {
+			t.Fatalf("row not suspect: %+v", r)
+		}
+	}
+	clk.t = clk.t.Add(5 * time.Minute)
+	tr.Tick(ctx)
+	if n := len(rec.all()); n != 33 {
+		t.Fatalf("tick rewrote clean rows: %d changes", n)
+	}
+}
+
+// A stored proxy-suspect row marks its live siblings suspect on warm start.
+func TestTrackerLoadMarksProxySiblings(t *testing.T) {
+	tr, _, clk, _ := newTestTracker(t, DefaultTrackerConfig())
+	sib := netip.MustParseAddr("2001:db8::2")
+	tr.Load([]store.Sighting{
+		{MAC: "aa:bb:cc:00:00:01", Addr: netip.MustParseAddr("2001:db8::1"), Link: "eth0", FirstSeen: clk.t, LastSeen: clk.t, ProxySuspect: true},
+		{MAC: "aa:bb:cc:00:00:01", Addr: sib, Link: "eth0", FirstSeen: clk.t, LastSeen: clk.t},
+	})
+	if _, ok := tr.MACFor(sib); ok {
+		t.Fatal("sibling of a proxy-suspect row should be suspect")
+	}
+	for k, e := range tr.entries {
+		// The sibling's row changed, so it is dirty and gets rewritten.
+		if !e.ProxySuspect || (k.addr == sib && !e.dirty) {
+			t.Fatalf("entry %v = %+v", k, e)
+		}
+	}
+}
+
+// A just-created entry must not be flushed by a Tick that runs while its
+// first write is still in flight.
+func TestTrackerNewEntryNotFlushedWhileInFlight(t *testing.T) {
+	tr, rec, _, _ := newTestTracker(t, DefaultTrackerConfig())
+	ctx := context.Background()
+	o := obs(t, "aa:bb:cc:00:00:01", "2001:db8::1")
+	rec.hook = func() {
+		tr.Observe(ctx, o) // repeat: marks it dirty
+		tr.Tick(ctx)
+	}
+	tr.Observe(ctx, o)
+	if n := len(rec.all()); n != 1 {
+		t.Fatalf("changes = %d, want 1", n)
 	}
 }
