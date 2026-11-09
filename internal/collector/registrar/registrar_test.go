@@ -484,3 +484,28 @@ func TestSightingBeatsDUIDMAC(t *testing.T) {
 		t.Fatalf("event = %+v", ev)
 	}
 }
+
+// flakyLookup answers once, then reports nothing, like an entry that goes idle.
+type flakyLookup struct{ calls int }
+
+func (f *flakyLookup) MACFor(netip.Addr) (string, bool) {
+	f.calls++
+	if f.calls == 1 {
+		return "aa:bb:cc:dd:ee:ff", true
+	}
+	return "", false
+}
+
+func TestSightingLookedUpOnce(t *testing.T) {
+	e := newEnv(t)
+	fl := &flakyLookup{}
+	e.r.Sightings = fl
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, uuidDUID, 7200), testAddr))
+	b, _ := e.binding(testAddr)
+	if b.MACSrc == MACSrcND && b.MAC == "" {
+		t.Fatalf("nd source with empty MAC: %+v", b)
+	}
+	if fl.calls != 1 || b.MAC != "aa:bb:cc:dd:ee:ff" {
+		t.Fatalf("calls=%d binding=%+v", fl.calls, b)
+	}
+}

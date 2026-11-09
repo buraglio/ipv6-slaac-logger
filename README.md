@@ -101,7 +101,7 @@ registrar's. Each name has exactly one owner, and a test enforces that.
 | Counter | Meaning |
 |---|---|
 | `frames` | Frames read from the sniffed interfaces (summed over interfaces). |
-| `nd_malformed` | Frames that matched the filter but failed to parse as ND. |
+| `nd_malformed` | Frames that passed the kernel filter but failed ND parsing or the RFC 4861 §6.1 validity checks (hop limit not 255, bad checksum, nonzero code, bad option lengths, multicast NS/NA target, malformed DAD). |
 | `nd_not_nd` | Frames that passed the kernel filter but are not Neighbor Discovery. |
 | `nd_sightings` | New (MAC, address, link, VLAN) sightings admitted. |
 | `nd_suppressed` | `nd.new`/`nd.conflict` events not logged because of the 20/s rate cap. |

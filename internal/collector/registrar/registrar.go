@@ -225,10 +225,11 @@ func (r *Registrar) bindingFor(req *Request, v Valid, now time.Time) store.Bindi
 		b.MAC, b.MACSrc = req.Relay.CLLAO.String(), MACSrcCLLAO
 	case isAgent && validMAC(info["mac"]) != "":
 		b.MAC, b.MACSrc = validMAC(info["mac"]), MACSrcVendor
-	case r.sightedMAC(v.IA.Addr) != "":
-		b.MAC, b.MACSrc = r.sightedMAC(v.IA.Addr), MACSrcND
 	default:
-		if mac, ok := dhcp6.MACFromDUID(v.DUID); ok {
+		// Looked up once: a second lookup could disagree with the first.
+		if nd := r.sightedMAC(v.IA.Addr); nd != "" {
+			b.MAC, b.MACSrc = nd, MACSrcND
+		} else if mac, ok := dhcp6.MACFromDUID(v.DUID); ok {
 			b.MAC, b.MACSrc = mac.String(), MACSrcDUID
 		}
 	}
