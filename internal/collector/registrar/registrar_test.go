@@ -369,3 +369,80 @@ func TestInvalidDoesNotDrainGlobalBucket(t *testing.T) {
 		t.Fatalf("received=%d rejected=%d", e.r.Stats.Received.Load(), e.r.Stats.Rejected.Load())
 	}
 }
+
+func TestUnicastCopyDoesNotDowngradeRelayBinding(t *testing.T) {
+	e := newEnv(t)
+	m := inform(t, testAddr, testDUID, 7200, agentOpts(t, 32473, "02:00:00:00:00:01")...)
+	rel := relayReq(m, testAddr)
+	rel.Relay.CLLAO = net.HardwareAddr{0x02, 0xaa, 0xbb, 0xcc, 0xdd, 0xee}
+	e.r.Handle(ctx, rel)
+	uni := &Request{Msg: m, Src: netip.AddrPortFrom(testAddr, 546), IfName: "eth9", Via: ViaUnicast}
+	if e.r.Handle(ctx, uni) == nil {
+		t.Fatal("unicast copy got no reply")
+	}
+	if got := e.types(); !equal(got, []string{event.RegAdd}) {
+		t.Fatalf("events = %v", got)
+	}
+	b, _ := e.binding(testAddr)
+	if b.MAC != "02:aa:bb:cc:dd:ee" || b.MACSrc != MACSrcCLLAO || b.Link != "relay/"+relayLink.String() || b.Via != ViaRelay {
+		t.Fatalf("binding = %+v", b)
+	}
+}
+
+func TestUnicastCopyKeepsMulticastLink(t *testing.T) {
+	e := newEnv(t)
+	m := inform(t, testAddr, testDUID, 7200)
+	e.r.Handle(ctx, mcastReq(m, testAddr))
+	uni := &Request{Msg: m, Src: netip.AddrPortFrom(testAddr, 546), IfName: "eth9", Via: ViaUnicast}
+	if e.r.Handle(ctx, uni) == nil {
+		t.Fatal("unicast copy got no reply")
+	}
+	if got := e.types(); !equal(got, []string{event.RegAdd}) {
+		t.Fatalf("events = %v", got)
+	}
+	if b, _ := e.binding(testAddr); b.Link != "eth0" || b.Via != ViaMulticast {
+		t.Fatalf("binding = %+v", b)
+	}
+}
+
+func TestEqualPrecedenceMACChangeIsChange(t *testing.T) {
+	e := newEnv(t)
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 7200, agentOpts(t, 32473, "02:00:00:00:00:01")...), testAddr))
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 7200, agentOpts(t, 32473, "02:00:00:00:00:02")...), testAddr))
+	if got := e.types(); !equal(got, []string{event.RegAdd, event.RegChange}) {
+		t.Fatalf("events = %v", got)
+	}
+	if ev := e.events()[1]; ev.MAC != "02:00:00:00:00:02" || ev.MACSrc != MACSrcVendor {
+		t.Fatalf("change event = %+v", ev)
+	}
+}
+
+func TestHigherPrecedenceMACIsChange(t *testing.T) {
+	e := newEnv(t)
+	m := inform(t, testAddr, testDUID, 7200)
+	e.r.Handle(ctx, mcastReq(m, testAddr))
+	rel := relayReq(m, testAddr)
+	rel.Relay.CLLAO = net.HardwareAddr{0x02, 0xaa, 0xbb, 0xcc, 0xdd, 0xee}
+	e.r.Handle(ctx, rel)
+	if got := e.types(); !equal(got, []string{event.RegAdd, event.RegChange}) {
+		t.Fatalf("events = %v", got)
+	}
+	if b, _ := e.binding(testAddr); b.MACSrc != MACSrcCLLAO {
+		t.Fatalf("binding = %+v", b)
+	}
+}
+
+func TestMulticastLinkChangeIsChange(t *testing.T) {
+	e := newEnv(t)
+	m := inform(t, testAddr, testDUID, 7200)
+	e.r.Handle(ctx, mcastReq(m, testAddr))
+	r2 := mcastReq(m, testAddr)
+	r2.IfName = "eth1"
+	e.r.Handle(ctx, r2)
+	if got := e.types(); !equal(got, []string{event.RegAdd, event.RegChange}) {
+		t.Fatalf("events = %v", got)
+	}
+	if ev := e.events()[1]; ev.Link != "eth1" {
+		t.Fatalf("change event = %+v", ev)
+	}
+}

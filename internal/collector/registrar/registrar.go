@@ -175,6 +175,8 @@ func (r *Registrar) apply(ctx context.Context, req *Request, v Valid, now time.T
 		c = store.Change{Events: []event.Event{ev}, Put: []store.Binding{b}}
 	default:
 		b.FirstSeen = old.FirstSeen
+		keepProvenance(old, &b)
+		ev.MAC, ev.MACSrc, ev.Via, ev.Link = b.MAC, b.MACSrc, b.Via, b.Link
 		c.Put = []store.Binding{b}
 		if materialChange(old, b) {
 			ev.Type = event.RegChange
@@ -253,6 +255,33 @@ func validMAC(s string) string {
 		return ""
 	}
 	return m.String()
+}
+
+// macRank orders MAC sources by precedence.
+func macRank(src string) int {
+	switch src {
+	case MACSrcCLLAO:
+		return 3
+	case MACSrcVendor:
+		return 2
+	case MACSrcDUID:
+		return 1
+	}
+	return 0
+}
+
+// keepProvenance stops copies of one registration that arrive by different
+// paths from churning a live binding of the same DUID: a lower-precedence MAC
+// source never replaces a higher one, and a unicast copy (whose ingress
+// interface says little about the client's link) never replaces the link and
+// via learned from a multicast or relayed copy.
+func keepProvenance(old store.Binding, nb *store.Binding) {
+	if macRank(nb.MACSrc) < macRank(old.MACSrc) {
+		nb.MAC, nb.MACSrc = old.MAC, old.MACSrc
+	}
+	if nb.Via == ViaUnicast && (old.Via == ViaMulticast || old.Via == ViaRelay) {
+		nb.Link, nb.Via = old.Link, old.Via
+	}
 }
 
 // materialChange reports changes worth a reg.change event. A change of via
