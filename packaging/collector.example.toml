@@ -1,0 +1,34 @@
+# ipv6-ra-logger collector configuration
+state_dir      = "/var/lib/ra-logger"
+listen_addr    = "[::]:547"
+retention_days = 400
+
+# One block per interface. Roles:
+#   listen    - join ff02::1:2 and accept RFC 9686 registrations
+#   responder - answer Information-Request with option 148 (only on links
+#               with NO other DHCPv6 server; the router's RA needs the O flag)
+#   sniff     - passive ND/RA sniffer (not implemented in this build)
+[[interface]]
+name  = "eth0"
+roles = ["listen", "responder"]
+# prefixes = ["2001:db8:10::/64"]   # optional; on-link prefixes are learned
+
+[registrar]
+allowed_prefixes = []   # required for direct unicast registrations; empty = deny
+relay_prefixes   = []   # prefixes reachable through DHCPv6 relays
+trusted_relays   = []   # source prefixes of DHCPv6 relay agents allowed to forward registrations; empty = accept no relayed registrations
+
+[vendor]
+enterprise_number = 32473   # RFC 5612 documentation PEN - replace before production
+
+[log]
+facility = "local5"
+
+[[log.output]]
+type    = "unix"
+address = "/dev/log"
+
+# [[log.output]]
+# type    = "tls"
+# address = "rsyslog.example.net:6514"
+# ca_file = "/etc/ra-logger/ca.pem"

@@ -1,0 +1,34 @@
+[Unit]
+Description=ipv6-ra-logger collector (RFC 9686 registration server)
+Documentation=https://github.com/buraglio/ipv6-ra-logger
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ra-logger-collector run -config /etc/ra-logger/collector.toml
+User=ra-logger
+Group=ra-logger
+StateDirectory=ra-logger
+StateDirectoryMode=0750
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

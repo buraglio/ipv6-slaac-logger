@@ -49,3 +49,19 @@ jobs:
               go test -run='^$' -fuzz="^${target}\$" -fuzztime=20s "$pkg"
             done
           done
+
+  e2e-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Build static binaries and the e2e test
+        run: |
+          mkdir -p bin
+          CGO_ENABLED=0 go build -o bin/collector ./cmd/collector
+          CGO_ENABLED=0 go build -o bin/regsend ./cmd/regsend
+          go test -c -tags e2e -o bin/e2e.test ./test/e2e
+      - name: Run end-to-end tests in network namespaces
+        run: sudo RAL_BIN_DIR="$PWD/bin" ./bin/e2e.test -test.v
