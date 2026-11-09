@@ -34,11 +34,24 @@ trusted_relays   = []   # source prefixes of DHCPv6 relay agents allowed to forw
 #                           # proxy_suspect (a proxy-ND router, say): it gets no further nd.* events and is
 #                           # ignored by the hosts view and the registrar's MAC lookup. Its sightings are still stored.
 # max_entries     = 100000  # min 100. Cap on live (MAC, address, link, VLAN) sightings held in memory. Beyond it
-#                           # new sightings are dropped and counted in the stats counter sniff_overflow.
+#                           # new sightings are dropped and counted in the stats counter sniff_overflow; while
+#                           # it is full, genuine new hosts are dropped too, until flooded entries expire
+#                           # (idle_timeout).
+# max_routers     = 1000    # min 10. Cap on routers (link, VLAN, MAC, link-local address) tracked from RAs. Beyond
+#                           # it RAs from new routers are dropped (no row, no event) and counted in ra_overflow.
+#                           # Routers not seen for idle_timeout are dropped from memory without an event (their
+#                           # rows stay until retention_days); only routers seen within idle_timeout are loaded
+#                           # at start-up.
 #
-# Not configurable: nd.new/nd.conflict events are capped at 20/s (burst 200).
-# Over the cap the sighting is still stored but no event is logged (stats
-# counter nd_suppressed). nd.expire is never capped.
+# Not configurable:
+# - nd.new/nd.conflict events are capped at 20/s (burst 200). Over the cap the
+#   sighting is still stored but no event is logged (stats counter
+#   nd_suppressed). nd.expire is never capped, but is only logged for
+#   sightings whose nd.new/nd.conflict was logged.
+# - ra.seen/ra.change events are capped at 2/s (burst 50). Over the cap the
+#   router row is still written but no event is logged (ra_suppressed).
+# - Repeat sightings and RAs update last_seen in the database at most every
+#   5 minutes (and on a clean shutdown); they never produce syslog lines.
 
 [vendor]
 enterprise_number = 32473   # RFC 5612 documentation PEN - replace before production
