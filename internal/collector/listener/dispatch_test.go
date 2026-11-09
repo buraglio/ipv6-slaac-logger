@@ -113,7 +113,7 @@ func TestDispatchInfoRequest(t *testing.T) {
 
 func TestDispatchRelayUnwrapAndWrap(t *testing.T) {
 	reg := &fakeReg{reply: true}
-	d := &Dispatcher{Reg: reg}
+	d := &Dispatcher{Reg: reg, TrustedRelays: []netip.Prefix{netip.MustParsePrefix("2001:db8:ffff::/64")}}
 	ifid := dhcp6.Option{Code: dhcp6.OptInterfaceID, Data: []byte("eth7")}
 	cllao := dhcp6.Option{Code: dhcp6.OptClientLinkLayerAddr, Data: []byte{0, 1, 2, 0xaa, 0xbb, 0xcc, 0xdd, 0xee}}
 	inner := relayForw(t, informBytes(t), linkA, client, ifid, cllao)
@@ -143,11 +143,27 @@ func TestDispatchRelayUnwrapAndWrap(t *testing.T) {
 	if len(cm.Data) == 0 || cm.Data[0] != dhcp6.MsgAddrRegReply {
 		t.Fatalf("client reply = %x", cm.Data)
 	}
+
+	n := len(reg.reqs)
+	before := d.Dropped.Load()
+	bad := p
+	bad.Src = netip.AddrPortFrom(netip.MustParseAddr("2001:db8:eeee::2"), 547)
+	if d.Dispatch(ctx, bad) != nil || d.Dropped.Load() != before+1 {
+		t.Fatal("untrusted relay not dropped")
+	}
+	mc := p
+	mc.Dst = dhcp6.AllRelayAgentsAndServers
+	if d.Dispatch(ctx, mc) != nil || d.Dropped.Load() != before+2 {
+		t.Fatal("multicast relay not dropped")
+	}
+	if len(reg.reqs) != n {
+		t.Fatal("registrar called for untrusted relay")
+	}
 }
 
 func TestDispatchDropsHostileInput(t *testing.T) {
 	reg := &fakeReg{reply: true}
-	d := &Dispatcher{Reg: reg}
+	d := &Dispatcher{Reg: reg, TrustedRelays: []netip.Prefix{netip.MustParsePrefix("2001:db8:10::/64")}}
 	deep := informBytes(t)
 	for i := 0; i < MaxRelayDepth+1; i++ {
 		deep = relayForw(t, deep, linkA, client)
@@ -167,7 +183,7 @@ func TestDispatchDropsHostileInput(t *testing.T) {
 	}
 	for name, data := range cases {
 		before := d.Dropped.Load()
-		if out := d.Dispatch(ctx, pkt(data, dhcp6.AllRelayAgentsAndServers)); out != nil {
+		if out := d.Dispatch(ctx, pkt(data, linkA)); out != nil {
 			t.Errorf("%s: produced a reply", name)
 		}
 		if d.Dropped.Load() != before+1 {
@@ -182,8 +198,9 @@ func TestDispatchDropsHostileInput(t *testing.T) {
 func FuzzDispatch(f *testing.F) {
 	f.Add([]byte{dhcp6.MsgAddrRegInform, 1, 2, 3})
 	f.Add([]byte{dhcp6.MsgRelayForw})
-	d := &Dispatcher{Reg: &fakeReg{reply: true}, Resp: fakeResp{}, ResponderIfaces: map[int]bool{2: true}}
+	d := &Dispatcher{Reg: &fakeReg{reply: true}, Resp: fakeResp{}, ResponderIfaces: map[int]bool{2: true}, TrustedRelays: []netip.Prefix{netip.MustParsePrefix("::/0")}}
 	f.Fuzz(func(t *testing.T, b []byte) {
 		d.Dispatch(ctx, pkt(b, dhcp6.AllRelayAgentsAndServers))
+		d.Dispatch(ctx, pkt(b, linkA))
 	})
 }

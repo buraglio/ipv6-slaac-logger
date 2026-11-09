@@ -89,7 +89,7 @@ func (c *Conn) Serve(ctx context.Context, d *Dispatcher) error {
 		if out == nil {
 			continue
 		}
-		if _, err := c.p.WriteTo(out, &ipv6.ControlMessage{IfIndex: pkt.IfIndex}, ua); err != nil {
+		if _, err := c.p.WriteTo(out, replyControl(pkt, pkt.Src.Addr()), ua); err != nil {
 			c.log.Debug("listener: write reply", "dst", ua, "err", err)
 		}
 	}
@@ -107,4 +107,19 @@ func (c *Conn) ifName(idx int) string {
 	}
 	c.names[idx] = ifi.Name
 	return ifi.Name
+}
+
+// replyControl builds the write control message: the reply leaves from the
+// address the request was sent to, and is pinned to the ingress interface only
+// when the request was multicast or the destination is link-local.
+func replyControl(pkt Packet, dst netip.Addr) *ipv6.ControlMessage {
+	cm := &ipv6.ControlMessage{}
+	multicast := pkt.Dst.IsValid() && pkt.Dst.IsMulticast()
+	if pkt.Dst.IsValid() && !multicast {
+		cm.Src = net.IP(pkt.Dst.AsSlice())
+	}
+	if multicast || dst.IsLinkLocalUnicast() {
+		cm.IfIndex = pkt.IfIndex
+	}
+	return cm
 }

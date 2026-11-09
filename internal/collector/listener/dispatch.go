@@ -40,7 +40,10 @@ type Dispatcher struct {
 	Resp            InfoHandler
 	ResponderIfaces map[int]bool
 	Log             *slog.Logger
-	Dropped         atomic.Uint64
+	// TrustedRelays lists the source prefixes allowed to send Relay-Forward
+	// messages (unicast only). An empty list denies all relays.
+	TrustedRelays []netip.Prefix
+	Dropped       atomic.Uint64
 }
 
 // Dispatch returns the bytes to send back to pkt.Src, or nil.
@@ -73,6 +76,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, pkt Packet) []byte {
 		}
 		return marshal(reply)
 	case dhcp6.MsgRelayForw:
+		if !d.trustedRelay(pkt) {
+			return d.drop()
+		}
 		return d.relay(ctx, pkt)
 	}
 	return d.drop()
@@ -131,6 +137,18 @@ func (d *Dispatcher) relay(ctx context.Context, pkt Packet) []byte {
 		}
 	}
 	return out
+}
+
+func (d *Dispatcher) trustedRelay(pkt Packet) bool {
+	if !pkt.Dst.IsValid() || pkt.Dst.IsMulticast() {
+		return false
+	}
+	for _, p := range d.TrustedRelays {
+		if p.Contains(pkt.Src.Addr()) {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *Dispatcher) drop() []byte {

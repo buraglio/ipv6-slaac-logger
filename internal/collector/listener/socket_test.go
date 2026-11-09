@@ -49,6 +49,9 @@ func TestServeRoundTrip(t *testing.T) {
 	if r := reg.last(); r.Via != registrar.ViaUnicast || r.Src.Addr() != netip.MustParseAddr("::1") {
 		t.Fatalf("req = %+v", r)
 	}
+	if r := reg.last(); r.IfName == "" {
+		t.Fatal("IfName empty: PKTINFO not working")
+	}
 	cancel()
 	select {
 	case err := <-done:
@@ -57,5 +60,19 @@ func TestServeRoundTrip(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Serve did not stop")
+	}
+}
+
+func TestReplyControl(t *testing.T) {
+	uni := Packet{Dst: netip.MustParseAddr("2001:db8::1"), IfIndex: 4}
+	if cm := replyControl(uni, netip.MustParseAddr("2001:db8::9")); cm.IfIndex != 0 || !cm.Src.Equal(net.ParseIP("2001:db8::1")) {
+		t.Fatalf("unicast: %+v", cm)
+	}
+	mc := Packet{Dst: dhcp6.AllRelayAgentsAndServers, IfIndex: 4}
+	if cm := replyControl(mc, netip.MustParseAddr("fe80::9")); cm.IfIndex != 4 || cm.Src != nil {
+		t.Fatalf("multicast: %+v", cm)
+	}
+	if cm := replyControl(uni, netip.MustParseAddr("fe80::9")); cm.IfIndex != 4 {
+		t.Fatalf("link-local: %+v", cm)
 	}
 }
