@@ -52,6 +52,7 @@ type Agent struct {
 	ticker   *time.Ticker
 	debounce *time.Timer
 	keys     map[netip.Addr]sched.Key
+	ifOf     map[sched.Key]string
 	probes   map[string]*probeState
 	probeCh  chan probeResult
 	noDests  map[string]bool
@@ -104,6 +105,7 @@ func (a *Agent) init(ctx context.Context) {
 		}
 	}
 	a.keys = map[netip.Addr]sched.Key{}
+	a.ifOf = map[sched.Key]string{}
 	a.probes = map[string]*probeState{}
 	a.probeCh = make(chan probeResult, 16)
 	a.noDests = map[string]bool{}
@@ -209,8 +211,11 @@ func (a *Agent) onRescan(now time.Time) {
 		delete(a.warned, k)
 	}
 	a.keys = make(map[netip.Addr]sched.Key, len(sel))
+	a.ifOf = make(map[sched.Key]string, len(sel))
 	for _, s := range sel {
-		a.keys[s.Addr] = sched.Key{Addr: s.Addr, IfIndex: s.IfIndex}
+		k := sched.Key{Addr: s.Addr, IfIndex: s.IfIndex}
+		a.keys[s.Addr] = k
+		a.ifOf[k] = s.IfName
 	}
 }
 
@@ -269,7 +274,19 @@ func (a *Agent) onProbeResult(ifname string, ok bool, now time.Time) {
 	if st.ok != ok {
 		a.Log.Info("multicast registration support", "if", ifname, "enabled", ok)
 	}
+	was := st.ok
 	st.ok, st.at, st.pending = ok, now, false
+	if ok && !was {
+		// Multicast just became usable: forget this interface's keys and
+		// rescan so they return as new and are due now, rather than waiting
+		// for their next refresh.
+		for k, name := range a.ifOf {
+			if name == ifname {
+				a.Sched.Forget(k)
+			}
+		}
+		a.onRescan(now)
+	}
 }
 
 func (a *Agent) dest(name, ifname string) (sender.Dest, bool) {

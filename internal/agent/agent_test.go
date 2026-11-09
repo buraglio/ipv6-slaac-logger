@@ -373,3 +373,26 @@ func TestRunnerShutdownSendsNothing(t *testing.T) {
 		}
 	}
 }
+
+func TestRunnerProbeSuccessRegistersImmediately(t *testing.T) {
+	src := &fakeSrc{list: []addrsrc.Addr{slaac("2001:db8::1", 2)}}
+	tx := newTx()
+	a := newAgent(src, tx)
+	a.Multicast = "auto"
+	a.Collectors = nil
+	result := make(chan bool, 1)
+	a.Probe = func(context.Context, string) bool { return <-result }
+
+	a.onRescan(t0)
+	a.step(t0)
+	if n := len(tx.snapshot()); n != 0 {
+		t.Fatalf("sends before probe = %d", n)
+	}
+	result <- true
+	pr := <-a.probeCh
+	a.onProbeResult(pr.ifname, pr.ok, t0)
+	a.step(t0) // same instant: no refresh interval elapsed
+	if d := tx.dests(); len(d) != 1 || d[0] != "multicast" {
+		t.Fatalf("dests = %v, want [multicast]", d)
+	}
+}
