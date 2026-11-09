@@ -1,0 +1,33 @@
+# ra-logger-agent configuration. Every key is optional; defaults are shown.
+
+# Directory for the agent's persistent state (DUID, IAID). Default is per OS:
+# /var/lib/ra-logger-agent (Linux), /Library/Application Support/ra-logger-agent
+# (macOS), %ProgramData%\ra-logger-agent (Windows).
+# state_dir = "/var/lib/ra-logger-agent"
+
+# Client DUID as hex (4 to 130 bytes). Default: unset, generated and stored in state_dir.
+# duid = "00:03:00:01:5c:1e:9a:3b:21:aa"
+
+# FQDN reported to the collector. Default: the system hostname.
+# hostname = "host.example.net"
+
+# Collector addresses, IPv6 only: "2001:db8::53" (port 547) or "[2001:db8::53]:547".
+# Default: empty, so only multicast is used.
+# collectors = ["2001:db8::53"]
+
+# Multicast use: "auto" or "always". Default: "auto".
+# multicast = "auto"
+
+# How often to re-register when nothing changed; minimum 1m. Default: "1h".
+# heartbeat = "1h"
+
+# Interface name globs (path.Match syntax). Default: empty, meaning all interfaces.
+# include_interfaces = ["eth*", "en*"]
+# exclude_interfaces = ["docker*", "veth*"]
+
+# Private Enterprise Number sent in the vendor option. Default: 32473, the
+# RFC 5612 documentation PEN. It must match the collector's [vendor] enterprise_number.
+# enterprise_number = 32473
+
+# Log verbosity: debug, info, warn or error. Default: "info".
+# log_level = "info"
