@@ -20,7 +20,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.26.x'
+          check-latest: true
       - run: go vet ./...
       - run: go test -race ./...
 
@@ -30,7 +31,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.26.x'
+          check-latest: true
       - run: go run honnef.co/go/tools/cmd/staticcheck@2026.2.2 ./...
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
@@ -40,7 +42,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.26.x'
+          check-latest: true
       - name: Short fuzz run of every Fuzz target
         run: |
           set -euo pipefail
@@ -56,7 +59,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.26.x'
+          check-latest: true
       - name: Build static binaries and the e2e test
         run: |
           mkdir -p bin
