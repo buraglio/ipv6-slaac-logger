@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"time"
 
 	"github.com/buraglio/ipv6-ra-logger/internal/agent/addrsrc"
 	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
@@ -138,14 +139,25 @@ func (t *Transport) Send(a addrsrc.Addr, d Dest, payload []byte) error {
 func (t *Transport) read(s *sock) {
 	defer t.wg.Done()
 	buf := make([]byte, 2048)
+	var errs int
+	backoff := 100 * time.Millisecond
 	for {
 		n, from, err := s.conn.ReadFromUDPAddrPort(buf)
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
 				return
 			}
-			t.Log.Debug("read error", "addr", s.addr, "err", err)
+			if errs == 0 {
+				t.Log.Debug("read error", "addr", s.addr, "err", err)
+			}
+			errs++
+			time.Sleep(backoff)
+			backoff = min(backoff*2, 5*time.Second)
 			continue
+		}
+		if errs > 0 {
+			t.Log.Debug("read recovered", "addr", s.addr, "errors", errs)
+			errs, backoff = 0, 100*time.Millisecond
 		}
 		m, err := dhcp6.ParseMessage(buf[:n])
 		if err != nil || m.Type != dhcp6.MsgAddrRegReply {

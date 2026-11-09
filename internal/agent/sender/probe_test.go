@@ -1,6 +1,7 @@
 package sender
 
 import (
+	"net"
 	"testing"
 
 	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
@@ -42,4 +43,16 @@ func FuzzReplyEnables(f *testing.F) {
 	f.Add(mkMsg(f, dhcp6.MsgReply, [3]byte{1, 2, 3}, dhcp6.Option{Code: dhcp6.OptAddrRegEnable}))
 	f.Add([]byte{})
 	f.Fuzz(func(t *testing.T, b []byte) { replyEnables(b, [3]byte{1, 2, 3}) })
+}
+
+func TestLinkLocal(t *testing.T) {
+	v4 := &net.IPNet{IP: net.ParseIP("169.254.1.1"), Mask: net.CIDRMask(16, 32)} // 16-byte form
+	v6 := &net.IPNet{IP: net.ParseIP("fe80::1"), Mask: net.CIDRMask(64, 128)}
+	got, err := linkLocal([]net.Addr{v4, v6}, "en0")
+	if err != nil || got.String() != "fe80::1%en0" {
+		t.Fatalf("got %v %v", got, err)
+	}
+	if _, err := linkLocal([]net.Addr{v4}, "en0"); err == nil {
+		t.Fatal("want error for v4-only")
+	}
 }

@@ -22,19 +22,9 @@ func Probe(ctx context.Context, ifname string, duid []byte, serverPort int) (boo
 	if err != nil {
 		return false, err
 	}
-	var ll netip.Addr
-	for _, a := range addrs {
-		ipn, ok := a.(*net.IPNet)
-		if !ok {
-			continue
-		}
-		if ip, ok := netip.AddrFromSlice(ipn.IP); ok && ip.Is6() && ip.IsLinkLocalUnicast() {
-			ll = ip.WithZone(ifname)
-			break
-		}
-	}
-	if !ll.IsValid() {
-		return false, fmt.Errorf("sender: no link-local address on %s", ifname)
+	ll, err := linkLocal(addrs, ifname)
+	if err != nil {
+		return false, err
 	}
 	xid, err := dhcp6.RandomXID()
 	if err != nil {
@@ -64,7 +54,14 @@ func Probe(ctx context.Context, ifname string, duid []byte, serverPort int) (boo
 		if _, err := conn.WriteToUDPAddrPort(req, dst); err != nil {
 			return false, err
 		}
-		conn.SetReadDeadline(time.Now().Add(timeout))
+		dl := time.Now().Add(timeout)
+		if cd, ok := ctx.Deadline(); ok && cd.Before(dl) {
+			dl = cd
+		}
+		conn.SetReadDeadline(dl)
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
 		for {
 			n, _, err := conn.ReadFromUDPAddrPort(buf)
 			if err != nil {
@@ -83,6 +80,21 @@ func Probe(ctx context.Context, ifname string, duid []byte, serverPort int) (boo
 		timeout *= 2
 	}
 	return false, nil
+}
+
+// linkLocal returns the first IPv6 link-local unicast address in addrs (not
+// an IPv4 address in 16-byte form), with ifname as its zone.
+func linkLocal(addrs []net.Addr, ifname string) (netip.Addr, error) {
+	for _, a := range addrs {
+		ipn, ok := a.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		if ip, ok := netip.AddrFromSlice(ipn.IP); ok && ip.Is6() && !ip.Is4In6() && ip.IsLinkLocalUnicast() {
+			return ip.WithZone(ifname), nil
+		}
+	}
+	return netip.Addr{}, fmt.Errorf("sender: no link-local address on %s", ifname)
 }
 
 // replyEnables reports whether b is a Reply for xid carrying option 148.
