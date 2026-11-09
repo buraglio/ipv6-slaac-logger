@@ -10,7 +10,8 @@ retention_days = 400
 #   sniff     - passive ND/RA sniffer (not implemented in this build)
 [[interface]]
 name  = "eth0"
-roles = ["listen", "responder"]
+roles = ["listen"]
+# roles = ["listen", "responder"]   # responder ONLY if no other DHCPv6 server is on the link (see above)
 # prefixes = ["2001:db8:10::/64"]   # optional; on-link prefixes are learned
 
 [registrar]
