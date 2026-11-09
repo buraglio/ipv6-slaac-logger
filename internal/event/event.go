@@ -58,6 +58,13 @@ type Event struct {
 	Src       string            `json:"src,omitempty"`
 	Count     uint64            `json:"count,omitempty"`
 	Counters  map[string]uint64 `json:"counters,omitempty"`
+	VLAN      uint16            `json:"vlan,omitempty"`
+	Kind      string            `json:"kind,omitempty"`
+	PrevMAC   string            `json:"prev_mac,omitempty"`
+	Managed   *bool             `json:"managed,omitempty"`
+	Other     *bool             `json:"other,omitempty"`
+	Prefixes  []string          `json:"prefixes,omitempty"`
+	RouterLft *uint32           `json:"router_lft,omitempty"`
 }
 
 // New returns an event of the given type stamped with now (UTC, millisecond precision).
@@ -67,6 +74,9 @@ func New(typ string, now time.Time) Event {
 
 // U32 returns a pointer to v, for lifetime fields where 0 is meaningful.
 func U32(v uint32) *uint32 { return &v }
+
+// Bool returns a pointer to v, for flag fields where false is meaningful.
+func Bool(v bool) *bool { return &v }
 
 // TimePtr returns a pointer to t in UTC with millisecond precision.
 func TimePtr(t time.Time) *time.Time {
@@ -144,6 +154,13 @@ type wireEvent struct {
 	Src       string            `json:"src,omitempty"`
 	Count     uint64            `json:"count,omitempty"`
 	Counters  map[string]uint64 `json:"counters,omitempty"`
+	VLAN      uint16            `json:"vlan,omitempty"`
+	Kind      string            `json:"kind,omitempty"`
+	PrevMAC   string            `json:"prev_mac,omitempty"`
+	Managed   *bool             `json:"managed,omitempty"`
+	Other     *bool             `json:"other,omitempty"`
+	Prefixes  []string          `json:"prefixes,omitempty"`
+	RouterLft *uint32           `json:"router_lft,omitempty"`
 }
 
 // MarshalJSON writes fixed-width timestamps and does not HTML-escape <, >, &.
@@ -155,6 +172,8 @@ func (e Event) MarshalJSON() ([]byte, error) {
 		Preferred: e.Preferred, Valid: e.Valid, XID: e.XID, PrevDUID: e.PrevDUID,
 		FirstSeen: msPtr(e.FirstSeen), LastSeen: msPtr(e.LastSeen),
 		Reason: e.Reason, Src: e.Src, Count: e.Count, Counters: e.Counters,
+		VLAN: e.VLAN, Kind: e.Kind, PrevMAC: e.PrevMAC, Managed: e.Managed, Other: e.Other,
+		Prefixes: e.Prefixes, RouterLft: e.RouterLft,
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -177,6 +196,8 @@ func (e *Event) UnmarshalJSON(b []byte) error {
 		Preferred: w.Preferred, Valid: w.Valid, XID: w.XID, PrevDUID: w.PrevDUID,
 		FirstSeen: timePtr(w.FirstSeen), LastSeen: timePtr(w.LastSeen),
 		Reason: w.Reason, Src: w.Src, Count: w.Count, Counters: w.Counters,
+		VLAN: w.VLAN, Kind: w.Kind, PrevMAC: w.PrevMAC, Managed: w.Managed, Other: w.Other,
+		Prefixes: w.Prefixes, RouterLft: w.RouterLft,
 	}
 	return nil
 }
