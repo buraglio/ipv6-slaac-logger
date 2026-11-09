@@ -27,9 +27,10 @@
 # RAs. "always" sends on every link without probing. Collectors listed above are
 # always used by unicast. There is no de-registration: end of use is inferred
 # from last_seen plus expiry. Source port 546 is used if free, else an ephemeral port.
-# On Windows temporary and stable-privacy addresses are both reported as "slaac".
-# On macOS, if the lifetime ioctl fails, the address counts as infinite and is
-# refreshed every heartbeat.
+# On Windows the agent can't tell temporary from stable-privacy addresses, so both
+# are reported as "slaac" and both are registered.
+# On macOS, lifetimes come from SIOCGIFALIFETIME_IN6 as a wall-clock expiry. If
+# that ioctl fails, the address counts as infinite and is refreshed every heartbeat.
 # multicast = "auto"
 
 # How often to re-register when nothing changed; minimum 1m. Default: "1h".
