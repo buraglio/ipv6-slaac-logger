@@ -204,3 +204,31 @@ func FuzzDispatch(f *testing.F) {
 		d.Dispatch(ctx, pkt(b, linkA))
 	})
 }
+
+func TestDispatchLDRAUsesOuterLinkAddr(t *testing.T) {
+	reg := &fakeReg{reply: true}
+	d := &Dispatcher{Reg: reg, TrustedRelays: []netip.Prefix{netip.MustParsePrefix("2001:db8:ffff::/64")}}
+	cllao := dhcp6.Option{Code: dhcp6.OptClientLinkLayerAddr, Data: []byte{0, 1, 2, 0xaa, 0xbb, 0xcc, 0xdd, 0xee}}
+	ifid := dhcp6.Option{Code: dhcp6.OptInterfaceID, Data: []byte("port3")}
+	// RFC 6221 LDRA: link-address is unspecified; the L3 relay above it supplies the link.
+	ldra := relayForw(t, informBytes(t), netip.IPv6Unspecified(), client, ifid, cllao)
+	outer := relayForw(t, ldra, linkA, netip.MustParseAddr("fe80::1"))
+	p := pkt(outer, netip.MustParseAddr("2001:db8:ffff::9"))
+	p.Src = netip.AddrPortFrom(netip.MustParseAddr("2001:db8:ffff::2"), 547)
+	if d.Dispatch(ctx, p) == nil {
+		t.Fatal("no reply through LDRA")
+	}
+	r := reg.last()
+	if r.Relay.LinkAddr != linkA || r.Relay.PeerAddr != client || r.Relay.CLLAO.String() != "02:aa:bb:cc:dd:ee" ||
+		string(r.Relay.InterfaceID) != "port3" {
+		t.Fatalf("relay = %+v", r.Relay)
+	}
+
+	// Every link-address unspecified: LinkAddr stays ::.
+	allUnspec := relayForw(t, ldra, netip.IPv6Unspecified(), netip.MustParseAddr("fe80::1"))
+	p.Data = allUnspec
+	d.Dispatch(ctx, p)
+	if r := reg.last(); r.Relay.LinkAddr != netip.IPv6Unspecified() {
+		t.Fatalf("LinkAddr = %v, want ::", r.Relay.LinkAddr)
+	}
+}

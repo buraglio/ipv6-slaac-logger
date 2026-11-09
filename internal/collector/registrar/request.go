@@ -16,7 +16,9 @@ const (
 	ViaRelay     = "relay"
 )
 
-// RelayInfo is taken from the innermost Relay-Forward.
+// RelayInfo is taken from the innermost Relay-Forward, except LinkAddr: the
+// innermost link-address that is not unspecified (an LDRA sends ::), or ::
+// when every relay in the chain sent ::.
 type RelayInfo struct {
 	LinkAddr    netip.Addr
 	PeerAddr    netip.Addr

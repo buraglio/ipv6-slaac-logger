@@ -111,6 +111,15 @@ func (d *Dispatcher) relay(ctx context.Context, pkt Packet) []byte {
 	}
 	in := chain[len(chain)-1]
 	ri := &registrar.RelayInfo{LinkAddr: in.LinkAddr, PeerAddr: in.PeerAddr}
+	// A Lightweight DHCPv6 Relay Agent (RFC 6221) leaves link-address
+	// unspecified; the client's link is then the innermost relay above it
+	// that names one.
+	for i := len(chain) - 1; i >= 0; i-- {
+		if !chain[i].LinkAddr.IsUnspecified() {
+			ri.LinkAddr = chain[i].LinkAddr
+			break
+		}
+	}
 	if o, ok := in.Options.Get(dhcp6.OptInterfaceID); ok {
 		ri.InterfaceID = o.Data
 	}
