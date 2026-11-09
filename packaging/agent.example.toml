@@ -5,7 +5,12 @@
 # (macOS), %ProgramData%\ra-logger-agent (Windows).
 # state_dir = "/var/lib/ra-logger-agent"
 
-# Client DUID as hex (4 to 130 bytes). Default: unset, generated and stored in state_dir.
+# Client DUID as hex (4 to 130 bytes). Default: unset. The agent then uses the
+# OS DHCPv6 client's DUID (Windows registry, macOS DUID_IA.plist, Linux dhclient
+# default-duid), and otherwise generates a DUID-LLT saved in state_dir/agent-state.json,
+# stable across restarts and MAC randomization.
+# On Linux only dhclient's DUID is read. On systemd-networkd and NetworkManager
+# hosts the agent's DUID won't match the OS DHCPv6 client's, so set it here to match.
 # duid = "00:03:00:01:5c:1e:9a:3b:21:aa"
 
 # FQDN reported to the collector. Default: the system hostname.
@@ -16,6 +21,15 @@
 # collectors = ["2001:db8::53"]
 
 # Multicast use: "auto" or "always". Default: "auto".
+# "auto" sends to ff02::1:2 only on links where the agent's Information-Request
+# for option 148 is answered with option 148. That needs an RFC 9686 DHCPv6
+# server, or the collector's responder role with the O flag set in the router's
+# RAs. "always" sends on every link without probing. Collectors listed above are
+# always used by unicast. There is no de-registration: end of use is inferred
+# from last_seen plus expiry. Source port 546 is used if free, else an ephemeral port.
+# On Windows temporary and stable-privacy addresses are both reported as "slaac".
+# On macOS, if the lifetime ioctl fails, the address counts as infinite and is
+# refreshed every heartbeat.
 # multicast = "auto"
 
 # How often to re-register when nothing changed; minimum 1m. Default: "1h".
