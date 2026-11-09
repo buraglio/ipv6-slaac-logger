@@ -69,3 +69,45 @@ func TestRecordLogsFallbackSinkFailure(t *testing.T) {
 		t.Fatalf("fallback sink failure not logged:\n%s", out)
 	}
 }
+
+func TestStoreErrorIsRateLimited(t *testing.T) {
+	var buf bytes.Buffer
+	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	r := &Recorder{
+		Store:    fakeCommitter{err: errors.New("disk full")},
+		Fallback: []logger.Sink{logger.NewWriterSink("buf", &buf)},
+		Now:      func() time.Time { return now },
+	}
+	record := func() {
+		t.Helper()
+		if err := r.Record(context.Background(), store.Change{Events: []event.Event{event.New(event.RegAdd, now)}}); err == nil {
+			t.Fatal("expected the store error to be returned")
+		}
+	}
+	countLines := func(typ string) []string {
+		var out []string
+		for _, l := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+			if strings.Contains(l, `"event":"`+typ+`"`) {
+				out = append(out, l)
+			}
+		}
+		return out
+	}
+	for i := 0; i < 5; i++ {
+		record()
+		now = now.Add(10 * time.Second)
+	}
+	if n := len(countLines(event.RegAdd)); n != 5 {
+		t.Fatalf("reg.add lines = %d, want 5 (originals always forwarded)", n)
+	}
+	errs := countLines(event.StoreError)
+	if len(errs) != 1 || !strings.Contains(errs[0], `"count":1`) {
+		t.Fatalf("store.error lines = %v, want exactly 1 with count 1", errs)
+	}
+	now = now.Add(61 * time.Second)
+	record()
+	errs = countLines(event.StoreError)
+	if len(errs) != 2 || !strings.Contains(errs[1], `"count":5`) {
+		t.Fatalf("store.error lines = %v, want a second one with count 5", errs)
+	}
+}

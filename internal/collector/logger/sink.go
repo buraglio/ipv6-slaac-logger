@@ -19,6 +19,9 @@ type Sink interface {
 	Close() error
 }
 
+// unixWriteTimeout bounds one datagram write to the local syslog socket.
+const unixWriteTimeout = 2 * time.Second
+
 // UnixSink writes to a local syslog datagram socket such as /dev/log.
 type UnixSink struct {
 	path string
@@ -49,6 +52,9 @@ func (s *UnixSink) Send(e event.Event) error {
 		}
 		s.conn = c
 	}
+	// A wedged syslog daemon must not stall the collector (or the recorder's
+	// store-failure fallback) indefinitely.
+	_ = s.conn.SetWriteDeadline(time.Now().Add(unixWriteTimeout))
 	if _, err := s.conn.Write(line); err != nil {
 		s.conn.Close()
 		s.conn = nil
