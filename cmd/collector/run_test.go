@@ -38,6 +38,14 @@ func readFrame(r *bufio.Reader) (string, error) {
 }
 
 func TestRunRecordsAndForwards(t *testing.T) {
+	// Skip only when the host has no IPv6 loopback; any later failure of run
+	// is a real failure.
+	probe, err := net.ListenPacket("udp6", "[::1]:0")
+	if err != nil {
+		t.Skipf("no IPv6 loopback: %v", err)
+	}
+	probe.Close()
+
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +84,7 @@ func TestRunRecordsAndForwards(t *testing.T) {
 	select {
 	case addr = <-ready:
 	case err := <-done:
-		t.Skipf("collector could not start (no IPv6 loopback?): %v", err)
+		t.Fatalf("collector failed to start: %v", err)
 	case <-time.After(5 * time.Second):
 		t.Fatal("collector did not become ready")
 	}
