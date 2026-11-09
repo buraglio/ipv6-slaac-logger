@@ -3,6 +3,7 @@ package registrar
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net"
 	"net/netip"
 	"path/filepath"
@@ -315,5 +316,30 @@ func TestInfiniteLifetime(t *testing.T) {
 	b, _ := e.binding(testAddr)
 	if !b.ExpiresAt.Equal(t0.Add(InfiniteTTL)) {
 		t.Fatalf("ExpiresAt = %v", b.ExpiresAt)
+	}
+}
+
+type errStore struct{}
+
+func (errStore) GetBinding(context.Context, netip.Addr) (store.Binding, bool, error) {
+	return store.Binding{}, false, errors.New("boom")
+}
+func (errStore) ExpiredBindings(context.Context, time.Time) ([]store.Binding, error) {
+	return nil, nil
+}
+
+type countRec struct{ n int }
+
+func (c *countRec) Record(context.Context, store.Change) error { c.n++; return nil }
+
+func TestStoreReadErrorDropsWithoutRecording(t *testing.T) {
+	rec := &countRec{}
+	r := New(errStore{}, rec, testPolicy(), []byte{0, 4, 1, 2, 3, 4}, 32473)
+	r.Now = func() time.Time { return t0 }
+	if r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 7200), testAddr)) != nil {
+		t.Fatal("got a reply despite store read error")
+	}
+	if rec.n != 0 || r.Stats.Replied.Load() != 0 {
+		t.Fatalf("records=%d replied=%d", rec.n, r.Stats.Replied.Load())
 	}
 }

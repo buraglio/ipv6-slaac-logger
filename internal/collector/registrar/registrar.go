@@ -104,8 +104,11 @@ func (r *Registrar) Handle(ctx context.Context, req *Request) *dhcp6.Message {
 		return nil
 	}
 	r.mu.Lock()
-	r.apply(ctx, req, v, now)
+	ok := r.apply(ctx, req, v, now)
 	r.mu.Unlock()
+	if !ok {
+		return nil
+	}
 	r.Stats.Replied.Add(1)
 	return r.reply(req.Msg, v.IARaw)
 }
@@ -131,12 +134,14 @@ func (r *Registrar) reply(in *dhcp6.Message, iaRaw []byte) *dhcp6.Message {
 	}}
 }
 
-func (r *Registrar) apply(ctx context.Context, req *Request, v Valid, now time.Time) {
+// apply returns false when the binding store could not be read; nothing is
+// recorded and the request is dropped so the client retransmits.
+func (r *Registrar) apply(ctx context.Context, req *Request, v Valid, now time.Time) bool {
 	b := r.bindingFor(req, v, now)
 	old, found, err := r.Bindings.GetBinding(ctx, b.Addr)
 	if err != nil {
 		r.Log.Error("registrar: read binding", "addr", b.Addr, "err", err)
-		found = false
+		return false
 	}
 	ev := eventFor(event.RegAdd, b, now)
 	ev.DUIDType = dhcp6.DUIDTypeName(v.DUID)
@@ -149,11 +154,11 @@ func (r *Registrar) apply(ctx context.Context, req *Request, v Valid, now time.T
 	switch {
 	case v.IA.Valid == 0:
 		if !found {
-			return
+			return true
 		}
 		if old.DUID != b.DUID {
 			r.reject(ctx, req, ReasonDeregForeign, now)
-			return
+			return true
 		}
 		ev.Type = event.RegDereg
 		ev.FirstSeen = event.TimePtr(old.FirstSeen)
@@ -176,6 +181,7 @@ func (r *Registrar) apply(ctx context.Context, req *Request, v Valid, now time.T
 	if err := r.Rec.Record(ctx, c); err != nil {
 		r.Log.Error("registrar: record", "addr", b.Addr, "err", err)
 	}
+	return true
 }
 
 func (r *Registrar) bindingFor(req *Request, v Valid, now time.Time) store.Binding {
