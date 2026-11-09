@@ -63,6 +63,7 @@ func run(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func(n
 	static := map[string][]netip.Prefix{}
 	var listenIfaces []string
 	respIfaces := map[int]bool{}
+	listenIdx := map[int]bool{}
 	for _, ifc := range cfg.Interfaces {
 		pfx, err := config.ParsePrefixes(ifc.Prefixes)
 		if err != nil {
@@ -70,7 +71,12 @@ func run(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func(n
 		}
 		static[ifc.Name] = pfx
 		if ifc.Has(config.RoleListen) {
+			ifi, err := net.InterfaceByName(ifc.Name)
+			if err != nil {
+				return err
+			}
 			listenIfaces = append(listenIfaces, ifc.Name)
+			listenIdx[ifi.Index] = true
 		}
 		if ifc.Has(config.RoleResponder) {
 			ifi, err := net.InterfaceByName(ifc.Name)
@@ -101,7 +107,7 @@ func run(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func(n
 	}
 	reg := registrar.New(st, rec, &registrar.PrefixPolicy{OnLink: onLink.For, Relay: relay, Unicast: allowed}, sid, cfg.Vendor.EnterpriseNumber)
 	reg.Log = log
-	disp := &listener.Dispatcher{Reg: reg, Log: log, TrustedRelays: trusted}
+	disp := &listener.Dispatcher{Reg: reg, Log: log, TrustedRelays: trusted, ListenIfaces: listenIdx}
 	if len(respIfaces) > 0 {
 		disp.Resp = &responder.Responder{ServerID: sid}
 		disp.ResponderIfaces = respIfaces

@@ -39,7 +39,10 @@ type Dispatcher struct {
 	Reg             RegHandler
 	Resp            InfoHandler
 	ResponderIfaces map[int]bool
-	Log             *slog.Logger
+	// ListenIfaces are the interfaces (by index) that joined ff02::1:2.
+	// Multicast registrations arriving on any other interface are dropped.
+	ListenIfaces map[int]bool
+	Log          *slog.Logger
 	// TrustedRelays lists the source prefixes allowed to send Relay-Forward
 	// messages (unicast only). An empty list denies all relays.
 	TrustedRelays []netip.Prefix
@@ -53,6 +56,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, pkt Packet) []byte {
 	}
 	switch pkt.Data[0] {
 	case dhcp6.MsgAddrRegInform:
+		if pkt.Dst.IsMulticast() && !d.ListenIfaces[pkt.IfIndex] {
+			return d.drop()
+		}
 		m, err := dhcp6.ParseMessage(pkt.Data)
 		if err != nil {
 			return d.drop()

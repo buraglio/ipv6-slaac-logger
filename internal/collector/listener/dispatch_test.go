@@ -78,7 +78,7 @@ func pkt(data []byte, dst netip.Addr) Packet {
 
 func TestDispatchMulticastAndUnicast(t *testing.T) {
 	reg := &fakeReg{reply: true}
-	d := &Dispatcher{Reg: reg}
+	d := &Dispatcher{Reg: reg, ListenIfaces: map[int]bool{2: true}}
 	out := d.Dispatch(ctx, pkt(informBytes(t), dhcp6.AllRelayAgentsAndServers))
 	if len(out) == 0 || out[0] != dhcp6.MsgAddrRegReply {
 		t.Fatalf("out = %x", out)
@@ -198,7 +198,7 @@ func TestDispatchDropsHostileInput(t *testing.T) {
 func FuzzDispatch(f *testing.F) {
 	f.Add([]byte{dhcp6.MsgAddrRegInform, 1, 2, 3})
 	f.Add([]byte{dhcp6.MsgRelayForw})
-	d := &Dispatcher{Reg: &fakeReg{reply: true}, Resp: fakeResp{}, ResponderIfaces: map[int]bool{2: true}, TrustedRelays: []netip.Prefix{netip.MustParsePrefix("::/0")}}
+	d := &Dispatcher{Reg: &fakeReg{reply: true}, Resp: fakeResp{}, ResponderIfaces: map[int]bool{2: true}, ListenIfaces: map[int]bool{2: true}, TrustedRelays: []netip.Prefix{netip.MustParsePrefix("::/0")}}
 	f.Fuzz(func(t *testing.T, b []byte) {
 		d.Dispatch(ctx, pkt(b, dhcp6.AllRelayAgentsAndServers))
 		d.Dispatch(ctx, pkt(b, linkA))
@@ -230,5 +230,20 @@ func TestDispatchLDRAUsesOuterLinkAddr(t *testing.T) {
 	d.Dispatch(ctx, p)
 	if r := reg.last(); r.Relay.LinkAddr != netip.IPv6Unspecified() {
 		t.Fatalf("LinkAddr = %v, want ::", r.Relay.LinkAddr)
+	}
+}
+
+func TestDispatchMulticastOnlyOnListenIfaces(t *testing.T) {
+	reg := &fakeReg{reply: true}
+	d := &Dispatcher{Reg: reg, ListenIfaces: map[int]bool{2: true}}
+	p := pkt(informBytes(t), dhcp6.AllRelayAgentsAndServers)
+	p.IfIndex, p.IfName = 3, "eth1"
+	if out := d.Dispatch(ctx, p); out != nil || d.Dropped.Load() != 1 || len(reg.reqs) != 0 {
+		t.Fatalf("multicast on a non-listen interface: out=%x dropped=%d reqs=%d", out, d.Dropped.Load(), len(reg.reqs))
+	}
+	// Unicast on any interface is still accepted (policy decides).
+	p.Dst = linkA
+	if d.Dispatch(ctx, p) == nil || len(reg.reqs) != 1 {
+		t.Fatal("unicast on a non-listen interface dropped")
 	}
 }
