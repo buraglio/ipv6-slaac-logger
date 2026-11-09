@@ -47,6 +47,14 @@ var ErrAddrGone = errors.New("sender: address no longer assigned")
 type sock struct {
 	conn *net.UDPConn
 	addr netip.Addr
+	done chan struct{} // closed by Drop or Close; interrupts error backoff
+	// readFrom is the datagram source; tests replace it to inject errors.
+	readFrom func([]byte) (int, netip.AddrPort, error)
+}
+
+func (s *sock) shutdown() {
+	close(s.done)
+	s.conn.Close()
 }
 
 // Transport owns one UDP socket per registered address.
@@ -114,7 +122,7 @@ func (t *Transport) get(a addrsrc.Addr) (*sock, error) {
 			return nil, err
 		}
 	}
-	s := &sock{conn: conn, addr: key}
+	s := &sock{conn: conn, addr: key, done: make(chan struct{}), readFrom: conn.ReadFromUDPAddrPort}
 	t.socks[key] = s
 	t.wg.Add(1)
 	go t.read(s)
@@ -142,7 +150,7 @@ func (t *Transport) read(s *sock) {
 	var errs int
 	backoff := 100 * time.Millisecond
 	for {
-		n, from, err := s.conn.ReadFromUDPAddrPort(buf)
+		n, from, err := s.readFrom(buf)
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
 				return
@@ -151,7 +159,13 @@ func (t *Transport) read(s *sock) {
 				t.Log.Debug("read error", "addr", s.addr, "err", err)
 			}
 			errs++
-			time.Sleep(backoff)
+			timer := time.NewTimer(backoff)
+			select {
+			case <-s.done:
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
 			backoff = min(backoff*2, 5*time.Second)
 			continue
 		}
@@ -188,7 +202,7 @@ func (t *Transport) Drop(addr netip.Addr) {
 	delete(t.socks, addr)
 	t.mu.Unlock()
 	if s != nil {
-		s.conn.Close()
+		s.shutdown()
 	}
 }
 
@@ -210,7 +224,7 @@ func (t *Transport) Close() error {
 	t.socks = map[netip.Addr]*sock{}
 	t.mu.Unlock()
 	for _, s := range socks {
-		s.conn.Close()
+		s.shutdown()
 	}
 	t.wg.Wait()
 	return nil

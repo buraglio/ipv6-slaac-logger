@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -116,5 +117,36 @@ func TestMulticastDest(t *testing.T) {
 	d := MulticastDest("en0")
 	if d.Name != DestMulticast || d.To.String() != "[ff02::1:2%en0]:547" {
 		t.Fatalf("%+v", d)
+	}
+}
+
+func TestCloseInterruptsReaderBackoff(t *testing.T) {
+	tr := NewTransport(0, nil)
+	conn, err := net.ListenUDP("udp6", &net.UDPAddr{IP: net.IPv6loopback})
+	if err != nil {
+		t.Skipf("no IPv6 loopback: %v", err)
+	}
+	var calls atomic.Int32
+	s := &sock{conn: conn, addr: lo, done: make(chan struct{}), readFrom: func([]byte) (int, netip.AddrPort, error) {
+		calls.Add(1)
+		return 0, netip.AddrPort{}, errors.New("persistent failure")
+	}}
+	tr.mu.Lock()
+	tr.socks[lo] = s
+	tr.mu.Unlock()
+	tr.wg.Add(1)
+	go tr.read(s)
+	// Let the reader fail repeatedly so the backoff has grown (100ms, 200ms, 400ms).
+	deadline := time.Now().Add(3 * time.Second)
+	for calls.Load() < 3 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if calls.Load() < 3 {
+		t.Fatal("reader did not enter backoff")
+	}
+	start := time.Now()
+	tr.Close()
+	if d := time.Since(start); d > 500*time.Millisecond {
+		t.Fatalf("Close took %v", d)
 	}
 }
