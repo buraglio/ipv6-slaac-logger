@@ -72,3 +72,39 @@ jobs:
           go test -c -tags e2e -o bin/e2e.test ./test/e2e
       - name: Run end-to-end tests in network namespaces
         run: sudo RAL_BIN_DIR="$PWD/bin" ./bin/e2e.test -test.v -test.timeout=5m
+
+  interop-kea:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.x'
+          check-latest: true
+      - name: Install radvd
+        run: sudo apt-get update && sudo apt-get install -y radvd
+      # Kea 3.0 from ISC's Cloudsmith "kea-3-0" repository, added explicitly
+      # instead of piping ISC's setup script into bash. See
+      # https://kea.readthedocs.io/en/latest/arm/install.html#installation-from-packages
+      # and https://cloudsmith.io/~isc/repos/kea-3-0/setup/. The package name
+      # isc-kea-dhcp6 is the one ISC documents; verify it on the first run.
+      - name: Install Kea 3.0 (ISC Cloudsmith repository)
+        run: |
+          set -euo pipefail
+          curl -1sLf https://dl.cloudsmith.io/public/isc/kea-3-0/gpg.key \
+            | sudo gpg --dearmor -o /usr/share/keyrings/isc-kea-3-0.gpg
+          echo "deb [signed-by=/usr/share/keyrings/isc-kea-3-0.gpg] https://dl.cloudsmith.io/public/isc/kea-3-0/deb/ubuntu $(lsb_release -cs) main" \
+            | sudo tee /etc/apt/sources.list.d/isc-kea-3-0.list
+          sudo apt-get update
+          sudo apt-get install -y isc-kea-dhcp6
+          command -v kea-dhcp6 || ls /usr/sbin | grep -i kea
+      - name: Build the agent and the interop test
+        run: |
+          mkdir -p bin
+          CGO_ENABLED=0 go build -o bin/agent ./cmd/agent
+          go test -c -tags e2e,interop -o bin/e2e.test ./test/e2e
+      - name: Run the Kea interop test in network namespaces
+        run: sudo env "PATH=$PATH:/usr/sbin" RAL_BIN_DIR="$PWD/bin" ./bin/e2e.test -test.v -test.run TestAgentKeaInterop -test.timeout=5m

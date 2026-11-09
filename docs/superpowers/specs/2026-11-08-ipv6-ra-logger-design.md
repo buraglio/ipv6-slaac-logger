@@ -342,5 +342,5 @@ testdata/  docs/
 
 1. **Port 546.** How do Kea and native stacks reply when the ADDR-REG-INFORM source port isn't 546? Can the agent bind 546 next to the OS DHCPv6 client on macOS (`configd`) and Windows (the DHCP service)?
 2. **Linux DUID sources.** *Decided 2026-11-09:* v1 reads dhclient's `default-duid` only. networkd and NetworkManager are deferred. Otherwise the agent generates a DUID-LLT and saves it (§4.2).
-3. **Vendor Class options.** Confirm that Kea accepts ADDR-REG-INFORM messages carrying Vendor Class (16) and FQDN (39).
+3. **Vendor Class options.** Confirm that Kea accepts ADDR-REG-INFORM messages carrying Vendor Class (16) and FQDN (39). Test added (CI job interop-kea); result pending its first run.
 4. **PEN.** Replace 32473 with a real IANA PEN before production.
