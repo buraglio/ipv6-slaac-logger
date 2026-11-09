@@ -509,3 +509,49 @@ func TestSightingLookedUpOnce(t *testing.T) {
 		t.Fatalf("calls=%d binding=%+v", fl.calls, b)
 	}
 }
+
+// varLookup is a sighting lookup whose answer the test changes.
+type varLookup struct{ mac string }
+
+func (v *varLookup) MACFor(netip.Addr) (string, bool) { return v.mac, v.mac != "" }
+
+// An nd MAC is only as good as the sighting behind it: once the sighting no
+// longer confirms it (expired, or the MAC turned proxy-suspect), a refresh
+// falls back to the next source instead of keeping it forever.
+func TestStaleNDMACReplaced(t *testing.T) {
+	e := newEnv(t)
+	lk := &varLookup{"aa:bb:cc:dd:ee:ff"}
+	e.r.Sightings = lk
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 7200), testAddr))
+	if b, _ := e.binding(testAddr); b.MACSrc != MACSrcND {
+		t.Fatalf("binding = %+v", b)
+	}
+	lk.mac = ""
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 7200), testAddr))
+	if b, _ := e.binding(testAddr); b.MAC != testMAC.String() || b.MACSrc != MACSrcDUID {
+		t.Fatalf("binding after sighting lapsed = %+v", b)
+	}
+	if got := e.types(); !equal(got, []string{event.RegAdd, event.RegChange}) {
+		t.Fatalf("events = %v", got)
+	}
+	// A different confirmed nd MAC replaces a duid one, as before.
+	lk.mac = "aa:bb:cc:dd:ee:01"
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 7200), testAddr))
+	if b, _ := e.binding(testAddr); b.MAC != "aa:bb:cc:dd:ee:01" || b.MACSrc != MACSrcND {
+		t.Fatalf("binding = %+v", b)
+	}
+}
+
+// A confirmed nd MAC still beats the DUID MAC on refresh.
+func TestConfirmedNDMACKept(t *testing.T) {
+	e := newEnv(t)
+	e.r.Sightings = fakeLookup{"aa:bb:cc:dd:ee:ff"}
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 7200), testAddr))
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 7200), testAddr))
+	if b, _ := e.binding(testAddr); b.MAC != "aa:bb:cc:dd:ee:ff" || b.MACSrc != MACSrcND {
+		t.Fatalf("binding = %+v", b)
+	}
+	if got := e.types(); !equal(got, []string{event.RegAdd}) {
+		t.Fatalf("events = %v", got)
+	}
+}

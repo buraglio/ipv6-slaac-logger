@@ -301,8 +301,14 @@ func macRank(src string) int {
 // source never replaces a higher one, and a unicast copy (whose ingress
 // interface says little about the client's link) never replaces the link and
 // via learned from a multicast or relayed copy.
+//
+// An nd MAC is the exception: it is only as good as the sighting behind it.
+// bindingFor looks the sighting up whenever no higher source exists, so a
+// refresh without that same nd MAC means the sighting lapsed (expired, or the
+// MAC turned proxy-suspect) and the old MAC is not kept.
 func keepProvenance(old store.Binding, nb *store.Binding) {
-	if macRank(nb.MACSrc) < macRank(old.MACSrc) {
+	staleND := old.MACSrc == MACSrcND && !(nb.MACSrc == MACSrcND && nb.MAC == old.MAC)
+	if !staleND && macRank(nb.MACSrc) < macRank(old.MACSrc) {
 		nb.MAC, nb.MACSrc = old.MAC, old.MACSrc
 	}
 	if nb.Via == ViaUnicast && (old.Via == ViaMulticast || old.Via == ViaRelay) {
