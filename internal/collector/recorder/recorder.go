@@ -43,9 +43,17 @@ func (r *Recorder) Record(ctx context.Context, c store.Change) error {
 	se.Reason = err.Error()
 	for _, s := range r.Fallback {
 		for _, e := range c.Events {
-			_ = s.Send(e)
+			r.sendFallback(s, e)
 		}
-		_ = s.Send(se)
+		r.sendFallback(s, se)
 	}
 	return err
+}
+
+// sendFallback delivers e to s, logging (not returning) any sink failure so
+// the fallback path itself never loses an event silently.
+func (r *Recorder) sendFallback(s logger.Sink, e event.Event) {
+	if err := s.Send(e); err != nil && r.Log != nil {
+		r.Log.Warn("recorder: fallback sink failed", "sink", s.Name(), "event", e.Type, "err", err)
+	}
 }

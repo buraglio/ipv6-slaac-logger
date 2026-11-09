@@ -47,3 +47,25 @@ func TestRecordSuccessSkipsFallback(t *testing.T) {
 		t.Fatalf("fallback written on success: %s", buf.String())
 	}
 }
+
+type failingSink struct{ name string }
+
+func (f failingSink) Name() string           { return f.name }
+func (f failingSink) Send(event.Event) error { return errors.New("sink down") }
+func (f failingSink) Close() error           { return nil }
+
+func TestRecordLogsFallbackSinkFailure(t *testing.T) {
+	var logBuf bytes.Buffer
+	r := &Recorder{
+		Store:    fakeCommitter{err: errors.New("disk full")},
+		Fallback: []logger.Sink{failingSink{name: "bad-sink"}},
+		Log:      slog.New(slog.NewTextHandler(&logBuf, nil)),
+	}
+	if err := r.Record(context.Background(), store.Change{Events: []event.Event{event.New(event.RegAdd, time.Now())}}); err == nil {
+		t.Fatal("expected the store error to be returned")
+	}
+	out := logBuf.String()
+	if !strings.Contains(out, "fallback sink failed") || !strings.Contains(out, "bad-sink") {
+		t.Fatalf("fallback sink failure not logged:\n%s", out)
+	}
+}
