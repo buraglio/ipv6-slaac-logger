@@ -51,6 +51,14 @@ go test -race ./...                                        # unit tests (any OS)
 sudo -E env PATH=$PATH go test -tags e2e -v ./test/e2e     # Linux network-namespace end-to-end test
 ```
 
+## Known limitations
+
+- Interfaces with the `listen` or `responder` role must exist when the
+  collector starts; startup fails otherwise.
+- An interface that is deleted and recreated after startup loses its
+  `ff02::1:2` membership until the collector restarts.
+- Per-interface retry is planned together with the ND/RA sniffer work.
+
 ## Vendor Class enterprise number
 
 The agent identifies itself with a Vendor Class option (16). The default
