@@ -53,7 +53,31 @@ CREATE INDEX IF NOT EXISTS bindings_mac     ON bindings(mac);
 CREATE TABLE IF NOT EXISTS forwarder_state (
   name    TEXT PRIMARY KEY,
   last_id INTEGER NOT NULL
-);`
+);
+CREATE TABLE IF NOT EXISTS sightings (
+  mac TEXT NOT NULL, addr TEXT NOT NULL, link TEXT NOT NULL, vlan INTEGER NOT NULL DEFAULT 0,
+  kind TEXT NOT NULL, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL,
+  proxy_suspect INTEGER NOT NULL DEFAULT 0, expired INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (mac, addr, link, vlan));
+CREATE INDEX IF NOT EXISTS sightings_addr ON sightings(addr);
+CREATE INDEX IF NOT EXISTS sightings_last ON sightings(last_seen);
+CREATE TABLE IF NOT EXISTS routers (
+  link TEXT NOT NULL, vlan INTEGER NOT NULL DEFAULT 0, mac TEXT NOT NULL, addr TEXT NOT NULL,
+  managed INTEGER NOT NULL, other INTEGER NOT NULL, prefixes TEXT NOT NULL, lifetime INTEGER NOT NULL,
+  first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL,
+  PRIMARY KEY (link, vlan, mac, addr));
+CREATE VIEW IF NOT EXISTS hosts AS
+  SELECT b.addr, b.duid, b.host, CASE WHEN b.mac <> '' THEN b.mac ELSE COALESCE(s.mac, '') END AS mac,
+         CASE WHEN b.mac <> '' THEN b.mac_src WHEN s.mac IS NOT NULL THEN 'nd' ELSE '' END AS mac_src,
+         COALESCE(s.link, b.link) AS link, COALESCE(s.vlan, 0) AS vlan,
+         MIN(b.first_seen, COALESCE(s.first_seen, b.first_seen)) AS first_seen,
+         MAX(b.last_seen, COALESCE(s.last_seen, b.last_seen)) AS last_seen
+  FROM bindings b LEFT JOIN sightings s
+    ON s.addr = b.addr AND s.proxy_suspect = 0 AND s.expired = 0 AND (b.mac = '' OR s.mac = b.mac)
+  UNION ALL
+  SELECT s.addr, '', '', s.mac, 'nd', s.link, s.vlan, s.first_seen, s.last_seen
+  FROM sightings s
+  WHERE s.proxy_suspect = 0 AND s.expired = 0 AND NOT EXISTS (SELECT 1 FROM bindings b WHERE b.addr = s.addr);`
 
 const bindingCols = `addr, duid, mac, mac_src, origin, host, via, link, preferred, valid, first_seen, last_seen, expires_at`
 
@@ -67,6 +91,28 @@ ON CONFLICT(addr) DO UPDATE SET
 
 // lookupFields whitelists columns usable in *Where queries.
 var lookupFields = map[string]string{"addr": "addr", "duid": "duid", "mac": "mac"}
+
+// hostFields whitelists columns of the hosts view usable in HostsWhere.
+var hostFields = map[string]string{"addr": "addr", "duid": "duid", "mac": "mac"}
+
+// sightingFields whitelists columns usable in SightingsWhere.
+var sightingFields = map[string]string{"addr": "addr", "mac": "mac"}
+
+const sightingCols = `mac, addr, link, vlan, kind, first_seen, last_seen, proxy_suspect, expired`
+
+const upsertSighting = `INSERT INTO sightings(` + sightingCols + `)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(mac, addr, link, vlan) DO UPDATE SET
+  kind=excluded.kind, first_seen=excluded.first_seen, last_seen=excluded.last_seen,
+  proxy_suspect=excluded.proxy_suspect, expired=excluded.expired`
+
+const routerCols = `link, vlan, mac, addr, managed, other, prefixes, lifetime, first_seen, last_seen`
+
+const upsertRouter = `INSERT INTO routers(` + routerCols + `)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(link, vlan, mac, addr) DO UPDATE SET
+  managed=excluded.managed, other=excluded.other, prefixes=excluded.prefixes,
+  lifetime=excluded.lifetime, first_seen=excluded.first_seen, last_seen=excluded.last_seen`
 
 // Store wraps the SQLite database.
 type Store struct{ db *sql.DB }
@@ -88,6 +134,46 @@ type Binding struct {
 	ExpiresAt time.Time  `json:"expires_at"`
 }
 
+// Sighting is one observed (MAC, address, link, VLAN) association from ND traffic.
+type Sighting struct {
+	MAC          string     `json:"mac"`
+	Addr         netip.Addr `json:"addr"`
+	Link         string     `json:"link"`
+	VLAN         uint16     `json:"vlan,omitempty"`
+	Kind         string     `json:"kind"`
+	FirstSeen    time.Time  `json:"first_seen"`
+	LastSeen     time.Time  `json:"last_seen"`
+	ProxySuspect bool       `json:"proxy_suspect,omitempty"`
+	Expired      bool       `json:"expired,omitempty"`
+}
+
+// Router is a router observed advertising on a link.
+type Router struct {
+	Link      string     `json:"link"`
+	VLAN      uint16     `json:"vlan,omitempty"`
+	MAC       string     `json:"mac"`
+	Addr      netip.Addr `json:"addr"` // link-local
+	Managed   bool       `json:"managed"`
+	Other     bool       `json:"other"`
+	Prefixes  []string   `json:"prefixes"` // sorted
+	Lifetime  uint16     `json:"router_lft"`
+	FirstSeen time.Time  `json:"first_seen"`
+	LastSeen  time.Time  `json:"last_seen"`
+}
+
+// Host is one row of the hosts view: a binding and/or sighting per address.
+type Host struct {
+	Addr      netip.Addr `json:"addr"`
+	DUID      string     `json:"duid,omitempty"`
+	Host      string     `json:"host,omitempty"`
+	MAC       string     `json:"mac,omitempty"`
+	MACSrc    string     `json:"mac_src,omitempty"`
+	Link      string     `json:"link,omitempty"`
+	VLAN      uint16     `json:"vlan,omitempty"`
+	FirstSeen time.Time  `json:"first_seen"`
+	LastSeen  time.Time  `json:"last_seen"`
+}
+
 // StoredEvent is an event with its row ID.
 type StoredEvent struct {
 	ID    int64
@@ -99,6 +185,9 @@ type Change struct {
 	Events []event.Event
 	Put    []Binding
 	Delete []netip.Addr
+
+	PutSightings []Sighting
+	PutRouters   []Router
 }
 
 // Open opens (creating if needed) a read-write database.
@@ -164,6 +253,24 @@ func (s *Store) Commit(ctx context.Context, c Change) error {
 	for _, a := range c.Delete {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM bindings WHERE addr = ?`, a.String()); err != nil {
 			return fmt.Errorf("store: delete binding: %w", err)
+		}
+	}
+	for _, sg := range c.PutSightings {
+		if _, err := tx.ExecContext(ctx, upsertSighting,
+			sg.MAC, sg.Addr.String(), sg.Link, int64(sg.VLAN), sg.Kind,
+			sg.FirstSeen.UnixMilli(), sg.LastSeen.UnixMilli(), b2i(sg.ProxySuspect), b2i(sg.Expired)); err != nil {
+			return fmt.Errorf("store: upsert sighting: %w", err)
+		}
+	}
+	for _, r := range c.PutRouters {
+		prefixes, err := json.Marshal(append([]string{}, r.Prefixes...))
+		if err != nil {
+			return fmt.Errorf("store: encode prefixes: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, upsertRouter,
+			r.Link, int64(r.VLAN), r.MAC, r.Addr.String(), b2i(r.Managed), b2i(r.Other),
+			string(prefixes), int64(r.Lifetime), r.FirstSeen.UnixMilli(), r.LastSeen.UnixMilli()); err != nil {
+			return fmt.Errorf("store: upsert router: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -306,4 +413,148 @@ func (s *Store) PurgeEventsBefore(ctx context.Context, t time.Time) (int64, erro
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+func b2i(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func parseAddr(s string) (netip.Addr, error) {
+	a, err := netip.ParseAddr(s)
+	if err != nil {
+		return netip.Addr{}, fmt.Errorf("store: bad addr %q: %w", s, err)
+	}
+	return a, nil
+}
+
+func (s *Store) querySightings(ctx context.Context, q string, args ...any) ([]Sighting, error) {
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Sighting
+	for rows.Next() {
+		var sg Sighting
+		var addr string
+		var vlan, first, last, proxy, expired int64
+		if err := rows.Scan(&sg.MAC, &addr, &sg.Link, &vlan, &sg.Kind, &first, &last, &proxy, &expired); err != nil {
+			return nil, err
+		}
+		if sg.Addr, err = parseAddr(addr); err != nil {
+			return nil, err
+		}
+		sg.VLAN = uint16(vlan)
+		sg.FirstSeen, sg.LastSeen = time.UnixMilli(first).UTC(), time.UnixMilli(last).UTC()
+		sg.ProxySuspect, sg.Expired = proxy != 0, expired != 0
+		out = append(out, sg)
+	}
+	return out, rows.Err()
+}
+
+// Sightings returns all sightings, omitting expired ones unless includeExpired.
+func (s *Store) Sightings(ctx context.Context, includeExpired bool) ([]Sighting, error) {
+	q := `SELECT ` + sightingCols + ` FROM sightings`
+	if !includeExpired {
+		q += ` WHERE expired = 0`
+	}
+	return s.querySightings(ctx, q+` ORDER BY first_seen, mac, addr`)
+}
+
+// SightingsWhere returns sightings where field ("addr", "mac") equals value.
+func (s *Store) SightingsWhere(ctx context.Context, field, value string) ([]Sighting, error) {
+	col, ok := sightingFields[field]
+	if !ok {
+		return nil, fmt.Errorf("store: invalid lookup field %q", field)
+	}
+	return s.querySightings(ctx, `SELECT `+sightingCols+` FROM sightings WHERE `+col+` = ? ORDER BY first_seen, mac, addr`, value)
+}
+
+// Routers returns the observed routers last seen at or after since (the zero
+// time returns all of them).
+func (s *Store) Routers(ctx context.Context, since time.Time) ([]Router, error) {
+	q := `SELECT ` + routerCols + ` FROM routers`
+	var args []any
+	if !since.IsZero() {
+		q += ` WHERE last_seen >= ?`
+		args = append(args, since.UnixMilli())
+	}
+	rows, err := s.db.QueryContext(ctx, q+` ORDER BY link, vlan, mac, addr`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Router
+	for rows.Next() {
+		var r Router
+		var addr, prefixes string
+		var vlan, managed, other, lifetime, first, last int64
+		if err := rows.Scan(&r.Link, &vlan, &r.MAC, &addr, &managed, &other, &prefixes, &lifetime, &first, &last); err != nil {
+			return nil, err
+		}
+		if r.Addr, err = parseAddr(addr); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(prefixes), &r.Prefixes); err != nil {
+			return nil, fmt.Errorf("store: decode prefixes %q: %w", prefixes, err)
+		}
+		r.VLAN, r.Managed, r.Other, r.Lifetime = uint16(vlan), managed != 0, other != 0, uint16(lifetime)
+		r.FirstSeen, r.LastSeen = time.UnixMilli(first).UTC(), time.UnixMilli(last).UTC()
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// HostsWhere returns hosts-view rows where field ("addr", "mac", "duid") equals value.
+func (s *Store) HostsWhere(ctx context.Context, field, value string) ([]Host, error) {
+	col, ok := hostFields[field]
+	if !ok {
+		return nil, fmt.Errorf("store: invalid lookup field %q", field)
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT addr, duid, host, mac, mac_src, link, vlan, first_seen, last_seen FROM hosts WHERE `+col+` = ? ORDER BY first_seen, addr`, value)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Host
+	for rows.Next() {
+		var h Host
+		var addr string
+		var vlan, first, last int64
+		if err := rows.Scan(&addr, &h.DUID, &h.Host, &h.MAC, &h.MACSrc, &h.Link, &vlan, &first, &last); err != nil {
+			return nil, err
+		}
+		if h.Addr, err = parseAddr(addr); err != nil {
+			return nil, err
+		}
+		h.VLAN = uint16(vlan)
+		h.FirstSeen, h.LastSeen = time.UnixMilli(first).UTC(), time.UnixMilli(last).UTC()
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}
+
+// PurgeStaleBefore deletes sightings and routers last seen before t and
+// returns how many rows of each were removed.
+func (s *Store) PurgeStaleBefore(ctx context.Context, t time.Time) (sightings, routers int64, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	var n [2]int64
+	for i, tbl := range []string{"sightings", "routers"} {
+		res, err := tx.ExecContext(ctx, `DELETE FROM `+tbl+` WHERE last_seen < ?`, t.UnixMilli())
+		if err != nil {
+			return 0, 0, err
+		}
+		if n[i], err = res.RowsAffected(); err != nil {
+			return 0, 0, err
+		}
+	}
+	return n[0], n[1], tx.Commit()
 }

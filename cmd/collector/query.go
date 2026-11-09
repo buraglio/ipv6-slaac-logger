@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -27,6 +28,8 @@ type holderOut struct {
 	MAC   string    `json:"mac,omitempty"`
 	Host  string    `json:"host,omitempty"`
 	Since time.Time `json:"since,omitzero"`
+	// NDMACs are the MACs the sniffer saw using the address at At.
+	NDMACs []string `json:"nd_macs,omitempty"`
 	// Source is "events" when the answer comes from event history, or
 	// "current_binding" when the events are gone (past retention) and the
 	// still-live binding shows the address has been held since FirstSeen.
@@ -34,9 +37,11 @@ type holderOut struct {
 }
 
 type queryResult struct {
-	Bindings []store.Binding `json:"bindings"`
-	Events   []event.Event   `json:"events"`
-	Holder   *holderOut      `json:"holder,omitempty"`
+	Bindings  []store.Binding  `json:"bindings"`
+	Sightings []store.Sighting `json:"sightings"`
+	Hosts     []store.Host     `json:"hosts"`
+	Events    []event.Event    `json:"events"`
+	Holder    *holderOut       `json:"holder,omitempty"`
 }
 
 func queryCmd(args []string, w io.Writer) error {
@@ -88,7 +93,19 @@ func queryCmd(args []string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	res := queryResult{Bindings: bs, Events: make([]event.Event, len(evs))}
+	res := queryResult{Bindings: bs, Sightings: []store.Sighting{}, Hosts: []store.Host{}, Events: make([]event.Event, len(evs))}
+	if field != "duid" {
+		sg, err := st.SightingsWhere(ctx, field, value)
+		if err != nil && !noSuchTable(err) {
+			return err
+		}
+		res.Sightings = append(res.Sightings, sg...)
+	}
+	hs, err := st.HostsWhere(ctx, field, value)
+	if err != nil && !noSuchTable(err) {
+		return err
+	}
+	res.Hosts = append(res.Hosts, hs...)
 	for i, se := range evs {
 		res.Events[i] = se.Event
 	}
@@ -112,6 +129,7 @@ func queryCmd(args []string, w io.Writer) error {
 				}
 			}
 		}
+		res.Holder.NDMACs = query.SightedAt(all, res.Sightings, at)
 	}
 	if *asJSON {
 		enc := json.NewEncoder(w)
@@ -119,6 +137,12 @@ func queryCmd(args []string, w io.Writer) error {
 		return enc.Encode(res)
 	}
 	return writeText(w, res)
+}
+
+// noSuchTable reports a database that predates the sniffer: the read-only
+// open does not create its tables, so those lookups are empty, not errors.
+func noSuchTable(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "no such table")
 }
 
 func lookupKey(addr, mac, duid string) (string, string, error) {
@@ -187,6 +211,24 @@ func writeText(w io.Writer, res queryResult) error {
 		}
 	}
 	fmt.Fprintln(tw)
+	fmt.Fprintln(tw, "Sightings:")
+	if len(res.Sightings) == 0 {
+		fmt.Fprintln(tw, "  (none)")
+	} else {
+		fmt.Fprintln(tw, "MAC\tADDR\tLINK\tVLAN\tKIND\tFIRST SEEN\tLAST SEEN\tFLAGS")
+		for _, sg := range res.Sightings {
+			var flags []string
+			if sg.ProxySuspect {
+				flags = append(flags, "proxy_suspect")
+			}
+			if sg.Expired {
+				flags = append(flags, "expired")
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
+				sg.MAC, sg.Addr, sg.Link, sg.VLAN, sg.Kind, ts(sg.FirstSeen), ts(sg.LastSeen), dash(strings.Join(flags, ",")))
+		}
+	}
+	fmt.Fprintln(tw)
 	fmt.Fprintln(tw, "EVENTS")
 	if len(res.Events) == 0 {
 		fmt.Fprintln(tw, "  (none)")
@@ -211,6 +253,9 @@ func writeText(w io.Writer, res queryResult) error {
 			fmt.Fprintf(tw, "Holder at %s: duid=%s mac=%s host=%s since=%s%s\n", ts(h.At), h.DUID, dash(h.MAC), dash(h.Host), ts(h.Since), note)
 		} else {
 			fmt.Fprintf(tw, "No holder at %s\n", ts(h.At))
+		}
+		if len(h.NDMACs) > 0 {
+			fmt.Fprintf(tw, "sighted MACs: %s\n", strings.Join(h.NDMACs, ", "))
 		}
 	}
 	return tw.Flush()

@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"net/netip"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -177,5 +179,182 @@ func TestPersistsAndReadOnly(t *testing.T) {
 	}
 	if _, err := OpenReadOnly(filepath.Join(t.TempDir(), "missing.db")); err == nil {
 		t.Fatal("OpenReadOnly created a missing database")
+	}
+}
+
+func sampleSighting(mac string, a netip.Addr) Sighting {
+	return Sighting{MAC: mac, Addr: a, Link: "eth0", VLAN: 20, Kind: "na", FirstSeen: t0, LastSeen: t0}
+}
+
+func commitOrFatal(t *testing.T, s *Store, c Change) {
+	t.Helper()
+	if err := s.Commit(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSightingsUpsertAndQuery(t *testing.T) {
+	s, _ := openTemp(t)
+	sg := sampleSighting("aa", addrA)
+	commitOrFatal(t, s, Change{PutSightings: []Sighting{sg}})
+	sg.LastSeen = t0.Add(time.Minute)
+	sg.Kind = "dad"
+	commitOrFatal(t, s, Change{PutSightings: []Sighting{sg}})
+	got, err := s.SightingsWhere(ctx, "addr", addrA.String())
+	if err != nil || len(got) != 1 {
+		t.Fatalf("got %v err %v", got, err)
+	}
+	if !got[0].LastSeen.Equal(t0.Add(time.Minute)) || got[0].Kind != "dad" || !got[0].FirstSeen.Equal(t0) || got[0].VLAN != 20 {
+		t.Errorf("got %+v", got[0])
+	}
+	if by, _ := s.SightingsWhere(ctx, "mac", "aa"); len(by) != 1 {
+		t.Errorf("by mac: %v", by)
+	}
+	if _, err := s.SightingsWhere(ctx, "duid", "x"); err == nil {
+		t.Error("expected invalid field error")
+	}
+}
+
+func TestSightingsIncludeExpired(t *testing.T) {
+	s, _ := openTemp(t)
+	ex := sampleSighting("bb", addrB)
+	ex.Expired = true
+	commitOrFatal(t, s, Change{PutSightings: []Sighting{sampleSighting("aa", addrA), ex}})
+	if got, _ := s.Sightings(ctx, false); len(got) != 1 {
+		t.Errorf("without expired: %v", got)
+	}
+	if got, _ := s.Sightings(ctx, true); len(got) != 2 {
+		t.Errorf("with expired: %v", got)
+	}
+}
+
+func TestRoutersRoundTrip(t *testing.T) {
+	s, _ := openTemp(t)
+	r := Router{Link: "eth0", VLAN: 20, MAC: "aa", Addr: netip.MustParseAddr("fe80::1"), Managed: true,
+		Prefixes: []string{"2001:db8:10::/64", "2001:db8:11::/64"}, Lifetime: 1800, FirstSeen: t0, LastSeen: t0}
+	commitOrFatal(t, s, Change{PutRouters: []Router{r}})
+	r.LastSeen = t0.Add(time.Hour)
+	commitOrFatal(t, s, Change{PutRouters: []Router{r}})
+	got, err := s.Routers(ctx, time.Time{})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("got %v err %v", got, err)
+	}
+	if !reflect.DeepEqual(got[0], Router{Link: "eth0", VLAN: 20, MAC: "aa", Addr: r.Addr, Managed: true, Other: false,
+		Prefixes: r.Prefixes, Lifetime: 1800, FirstSeen: t0, LastSeen: t0.Add(time.Hour)}) {
+		t.Errorf("got %+v", got[0])
+	}
+}
+
+// Warm start reads only routers seen since a cutoff, so a flood of stale
+// rows is not loaded back into memory.
+func TestRoutersSince(t *testing.T) {
+	s, _ := openTemp(t)
+	old := Router{Link: "eth0", MAC: "aa", Addr: netip.MustParseAddr("fe80::1"), Prefixes: []string{}, FirstSeen: t0, LastSeen: t0}
+	fresh := old
+	fresh.MAC, fresh.LastSeen = "bb", t0.Add(2*time.Hour)
+	commitOrFatal(t, s, Change{PutRouters: []Router{old, fresh}})
+	got, err := s.Routers(ctx, t0.Add(time.Hour))
+	if err != nil || len(got) != 1 || got[0].MAC != "bb" {
+		t.Fatalf("got %+v err %v", got, err)
+	}
+}
+
+func TestHostsViewJoins(t *testing.T) {
+	s, _ := openTemp(t)
+	addrC := netip.MustParseAddr("2001:db8:10::7")
+	b1 := sampleBinding(addrA)
+	b1.MAC, b1.MACSrc = "aa", "duid"
+	b2 := sampleBinding(addrB)
+	b2.MAC, b2.MACSrc = "", ""
+	commitOrFatal(t, s, Change{
+		Put:          []Binding{b1, b2},
+		PutSightings: []Sighting{sampleSighting("aa", addrA), sampleSighting("bb", addrB), sampleSighting("cc", addrC)},
+	})
+	a, err := s.HostsWhere(ctx, "addr", addrA.String())
+	if err != nil || len(a) != 1 || a[0].MAC != "aa" || a[0].MACSrc != "duid" || a[0].DUID == "" || a[0].VLAN != 20 {
+		t.Errorf("A: %+v err %v", a, err)
+	}
+	b, _ := s.HostsWhere(ctx, "addr", addrB.String())
+	if len(b) != 1 || b[0].MAC != "bb" || b[0].MACSrc != "nd" {
+		t.Errorf("B: %+v", b)
+	}
+	c, _ := s.HostsWhere(ctx, "addr", addrC.String())
+	if len(c) != 1 || c[0].DUID != "" || c[0].MACSrc != "nd" || c[0].MAC != "cc" {
+		t.Errorf("C: %+v", c)
+	}
+	if m, _ := s.HostsWhere(ctx, "mac", "cc"); len(m) != 1 {
+		t.Errorf("by mac: %v", m)
+	}
+	if d, _ := s.HostsWhere(ctx, "duid", b1.DUID); len(d) != 2 {
+		t.Errorf("by duid: %v", d)
+	}
+	if _, err := s.HostsWhere(ctx, "host; drop", "x"); err == nil {
+		t.Error("expected invalid field error")
+	}
+}
+
+func TestHostsViewIgnoresProxySuspects(t *testing.T) {
+	s, _ := openTemp(t)
+	addrC := netip.MustParseAddr("2001:db8:10::7")
+	b := sampleBinding(addrA)
+	b.MAC, b.MACSrc = "", ""
+	proxy := sampleSighting("xx", addrA)
+	proxy.ProxySuspect = true
+	expired := sampleSighting("yy", addrC)
+	expired.Expired = true
+	commitOrFatal(t, s, Change{Put: []Binding{b}, PutSightings: []Sighting{proxy, expired}})
+	a, _ := s.HostsWhere(ctx, "addr", addrA.String())
+	if len(a) != 1 || a[0].MAC != "" || a[0].MACSrc != "" {
+		t.Errorf("proxy suspect leaked: %+v", a)
+	}
+	if c, _ := s.HostsWhere(ctx, "addr", addrC.String()); len(c) != 0 {
+		t.Errorf("expired leaked: %+v", c)
+	}
+}
+
+func TestPurgeStaleBefore(t *testing.T) {
+	s, _ := openTemp(t)
+	old := Router{Link: "eth0", MAC: "aa", Addr: netip.MustParseAddr("fe80::1"), Prefixes: []string{}, FirstSeen: t0, LastSeen: t0}
+	fresh := old
+	fresh.MAC, fresh.LastSeen = "bb", t0.Add(2*time.Hour)
+	commitOrFatal(t, s, Change{
+		PutSightings: []Sighting{sampleSighting("aa", addrA), func() Sighting { x := sampleSighting("bb", addrB); x.LastSeen = t0.Add(2 * time.Hour); return x }()},
+		PutRouters:   []Router{old, fresh},
+	})
+	ns, nr, err := s.PurgeStaleBefore(ctx, t0.Add(time.Hour))
+	if err != nil || ns != 1 || nr != 1 {
+		t.Fatalf("sightings=%d routers=%d err=%v", ns, nr, err)
+	}
+	sg, _ := s.Sightings(ctx, true)
+	rt, _ := s.Routers(ctx, time.Time{})
+	if len(sg) != 1 || len(rt) != 1 {
+		t.Errorf("remaining %d sightings %d routers", len(sg), len(rt))
+	}
+}
+
+func TestOpenExistingPlan1Database(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := `CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, type TEXT NOT NULL,
+  addr TEXT NOT NULL DEFAULT '', duid TEXT NOT NULL DEFAULT '', mac TEXT NOT NULL DEFAULT '', body TEXT NOT NULL);
+CREATE TABLE bindings (addr TEXT PRIMARY KEY, duid TEXT NOT NULL, mac TEXT NOT NULL DEFAULT '', mac_src TEXT NOT NULL DEFAULT '',
+  origin TEXT NOT NULL DEFAULT '', host TEXT NOT NULL DEFAULT '', via TEXT NOT NULL DEFAULT '', link TEXT NOT NULL DEFAULT '',
+  preferred INTEGER NOT NULL, valid INTEGER NOT NULL, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE forwarder_state (name TEXT PRIMARY KEY, last_id INTEGER NOT NULL);`
+	if _, err := db.Exec(old); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	commitOrFatal(t, s, Change{PutSightings: []Sighting{sampleSighting("aa", addrA)}})
+	if h, err := s.HostsWhere(ctx, "addr", addrA.String()); err != nil || len(h) != 1 {
+		t.Errorf("hosts: %v %v", h, err)
 	}
 }

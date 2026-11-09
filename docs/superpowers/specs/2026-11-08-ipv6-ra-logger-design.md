@@ -255,6 +255,14 @@ The rules are applied strictly, following RFC 9686 §5:
   - Both counters appear in the `stats` event.
 - An `nd.conflict` (a new MAC for an address that already has a different live MAC) is emitted instead of `nd.new` and carries `prev_mac`. Both sightings stay live.
 - `ra.seen` fires for a new router (link, VLAN, MAC, link-local address). `ra.change` fires when its M flag, O flag or prefix set changes. A change in router lifetime alone is stored but not logged.
+- `nd.expire` is logged only for sightings whose `nd.new` or `nd.conflict` was logged (sightings loaded at start-up count as logged), so a flood whose `nd.new` events were suppressed does not return as a flood of expiries.
+- **RA limits** (decided in the final review of the sniffer branch; the RA monitor was otherwise unbounded under a forged-RA flood):
+  - At most `max_routers = 1000` (configurable, min 10) routers are tracked. RAs from new routers beyond that are dropped (no row, no event) and counted in `ra_overflow`.
+  - `ra.seen` and `ra.change` share their own token bucket of 2/s with a burst of 50. Beyond it the router row is still written but no event is logged, counted in `ra_suppressed`.
+  - A router not seen for the idle time (`idle_timeout`, default 24 h) is dropped from memory with no event; there is no `ra.expire`. Its row stays until retention removes it. If it returns it gets a new `ra.seen`.
+  - At start-up only routers seen within the idle time are loaded.
+  - Both counters appear in the `stats` event.
+- Pending `last_seen` updates of sightings and routers are written on a clean shutdown.
 - **Not covered:** a host that never sends ND traffic the sniffer can see (for example, behind MLD snooping on an access port) produces no sightings. The sniffer runs on Linux only.
 
 ### 5.6 Store

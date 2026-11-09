@@ -91,3 +91,45 @@ func TestHolderAt(t *testing.T) {
 		t.Errorf("evidence/since wrong: %+v", h)
 	}
 }
+
+func TestSightedAt(t *testing.T) {
+	ndEv := func(id int64, typ, mac string, ts time.Time, last *time.Time) store.StoredEvent {
+		e := event.New(typ, ts)
+		e.MAC, e.LastSeen = mac, last
+		return store.StoredEvent{ID: id, Event: e}
+	}
+	h := func(n int) time.Time { return time.Date(2026, 11, 8, n, 0, 0, 0, time.UTC) }
+	evs := []store.StoredEvent{
+		ndEv(1, event.NDNew, "A", h(10), nil),
+		// Stamped by the sweep at 14:00; the last real sighting was 12:00.
+		ndEv(2, event.NDExpire, "A", h(14), event.TimePtr(h(12))),
+	}
+	live := []store.Sighting{{MAC: "B", FirstSeen: h(13), LastSeen: h(20)}}
+	for _, c := range []struct {
+		at   time.Time
+		want []string
+	}{
+		{h(11), []string{"A"}},
+		{h(12).Add(30 * time.Minute), []string{}},
+		{h(13).Add(30 * time.Minute), []string{"B"}},
+		{h(9), []string{}},
+	} {
+		got := SightedAt(evs, live, c.at)
+		if len(got) != len(c.want) || (len(got) > 0 && got[0] != c.want[0]) {
+			t.Errorf("at %v: got %v want %v", c.at, got, c.want)
+		}
+	}
+	// Proxy suspects never count. An expired row's [first_seen, last_seen]
+	// is still accurate, so it counts inside its window (its nd.expire may
+	// never have been logged). Duplicates collapse and sort.
+	cur := []store.Sighting{
+		{MAC: "P", FirstSeen: h(1), LastSeen: h(20), ProxySuspect: true},
+		{MAC: "X", FirstSeen: h(1), LastSeen: h(20), Expired: true},
+		{MAC: "Y", FirstSeen: h(1), LastSeen: h(5), Expired: true},
+		{MAC: "B", FirstSeen: h(1), LastSeen: h(20)},
+		{MAC: "A", FirstSeen: h(1), LastSeen: h(20)},
+	}
+	if got := SightedAt(evs, cur, h(11)); len(got) != 3 || got[0] != "A" || got[1] != "B" || got[2] != "X" {
+		t.Errorf("got %v", got)
+	}
+}

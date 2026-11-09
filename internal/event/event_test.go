@@ -148,3 +148,34 @@ func TestWireMatchesEvent(t *testing.T) {
 		}
 	}
 }
+
+func TestNewFieldsRoundTrip(t *testing.T) {
+	ts := time.Date(2026, 11, 8, 21, 14, 3, 412_000_000, time.UTC)
+	nd := New(NDNew, ts)
+	nd.MAC, nd.Addr, nd.VLAN, nd.Kind, nd.PrevMAC = "aa:bb:cc:dd:ee:ff", "2001:db8:10::5", 20, "dad", "11:22:33:44:55:66"
+	ra := New(RAChange, ts)
+	ra.Managed, ra.Other = Bool(true), Bool(false)
+	ra.Prefixes = []string{"2001:db8:10::/64"}
+	ra.RouterLft = U32(1800)
+	for _, e := range []Event{nd, ra} {
+		b, err := e.JSON()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got Event
+		if err := json.Unmarshal(b, &got); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, e) {
+			t.Errorf("round trip: got %+v want %+v", got, e)
+		}
+	}
+	b, _ := ra.JSON()
+	if !strings.Contains(string(b), `"managed":true,"other":false`) {
+		t.Errorf("missing managed/other in %s", b)
+	}
+	b, _ = nd.JSON()
+	if !strings.Contains(string(b), `"vlan":20,"kind":"dad","prev_mac":"11:22:33:44:55:66"`) {
+		t.Errorf("missing vlan/kind in %s", b)
+	}
+}
