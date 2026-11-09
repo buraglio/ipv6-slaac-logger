@@ -44,6 +44,9 @@ Look up an address:
 ra-logger-collector query -addr 2001:db8:10::5 -at 2026-11-08T21:00:00Z
 ```
 
+`query` reads the database in the state directory (mode 0750), so run it as
+root or as a member of the `ra-logger` group.
+
 ## Test
 
 ```sh
