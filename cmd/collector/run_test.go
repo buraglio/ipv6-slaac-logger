@@ -157,7 +157,7 @@ func TestRunSniffersRetriesMissingInterface(t *testing.T) {
 		StateDir: t.TempDir(), ListenAddr: "[::1]:0", RetentionDays: 400,
 		Vendor:     config.Vendor{EnterpriseNumber: 32473},
 		Interfaces: []config.Interface{{Name: "does-not-exist0", Roles: []string{config.RoleSniff}}},
-		Sniffer:    config.Sniffer{IdleTimeout: "24h", ProxyThreshold: 32, MaxEntries: 100000},
+		Sniffer:    config.Sniffer{IdleTimeout: "24h", ProxyThreshold: 32, MaxEntries: 100000, MaxRouters: 1000},
 		Log:        config.Log{Facility: "local5", Outputs: []config.Output{{Type: "stdout"}}},
 	}
 	logs := &syncBuf{}
@@ -194,7 +194,7 @@ func TestRunSniffersRetriesMissingInterface(t *testing.T) {
 func TestStatsCounterNamesAreUnique(t *testing.T) {
 	var reg registrar.Stats
 	tr := sniffer.NewTracker(sniffer.DefaultTrackerConfig(), nil, time.Now, slog.Default())
-	ra := sniffer.NewRAMonitor(nil, time.Minute, time.Now, slog.Default())
+	ra := sniffer.NewRAMonitor(sniffer.DefaultRAMonitorConfig(), nil, time.Now, slog.Default())
 	sn := &sniffer.Sniffer{Link: "eth0"}
 	sn2 := &sniffer.Sniffer{Link: "eth1"}
 	merged, dup := mergeCounters(reg.Snapshot(), map[string]uint64{"dropped": 0},
@@ -203,7 +203,7 @@ func TestStatsCounterNamesAreUnique(t *testing.T) {
 		t.Fatalf("counter names claimed by more than one component: %v", dup)
 	}
 	for _, name := range []string{"received", "dropped", "sniff_overflow", "nd_suppressed", "nd_sightings",
-		"nd_invalid", "ra_seen_total", "frames", "nd_malformed", "nd_not_nd"} {
+		"nd_invalid", "ra_seen_total", "ra_overflow", "ra_suppressed", "frames", "nd_malformed", "nd_not_nd"} {
 		if _, ok := merged[name]; !ok {
 			t.Errorf("stats counter %q missing", name)
 		}

@@ -116,13 +116,17 @@ func run(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func(n
 	tcfg.Idle, tcfg.LogLinkLocal = cfg.Sniffer.Idle(), cfg.Sniffer.LogLinkLocal
 	tcfg.ProxyThreshold, tcfg.MaxEntries = cfg.Sniffer.ProxyThreshold, cfg.Sniffer.MaxEntries
 	tracker := sniffer.NewTracker(tcfg, rec, time.Now, log)
-	ramon := sniffer.NewRAMonitor(rec, tcfg.Flush, time.Now, log)
+	rcfg := sniffer.DefaultRAMonitorConfig()
+	rcfg.Flush, rcfg.Idle, rcfg.MaxRouters = tcfg.Flush, tcfg.Idle, cfg.Sniffer.MaxRouters
+	ramon := sniffer.NewRAMonitor(rcfg, rec, time.Now, log)
 	sightings, err := st.Sightings(ctx, false)
 	if err != nil {
 		return err
 	}
 	tracker.Load(sightings)
-	routers, err := st.Routers(ctx)
+	// Only routers seen within idle_timeout are warm-loaded; older rows stay
+	// in the database until retention removes them.
+	routers, err := st.Routers(ctx, time.Now().Add(-rcfg.Idle))
 	if err != nil {
 		return err
 	}

@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
 	"github.com/buraglio/ipv6-ra-logger/internal/event"
 	"github.com/buraglio/ipv6-ra-logger/internal/nd"
@@ -29,34 +31,68 @@ type routerEntry struct {
 	gen uint64
 }
 
+// RAMonitorConfig tunes router tracking and its bounds.
+type RAMonitorConfig struct {
+	Flush      time.Duration // 5m: last_seen is written at most this often per router
+	Idle       time.Duration // 24h: routers not seen for this long are dropped from memory
+	MaxRouters int           // 1000
+	EventRate  float64       // 2 per second
+	EventBurst int           // 50
+}
+
+// DefaultRAMonitorConfig returns the documented defaults.
+func DefaultRAMonitorConfig() RAMonitorConfig {
+	return RAMonitorConfig{
+		Flush:      5 * time.Minute,
+		Idle:       24 * time.Hour,
+		MaxRouters: 1000,
+		EventRate:  2,
+		EventBurst: 50,
+	}
+}
+
 // RAMonitor tracks routers from observed Router Advertisements.
 type RAMonitor struct {
-	rec   Recorder
-	flush time.Duration
-	now   func() time.Time
-	log   *slog.Logger
+	cfg RAMonitorConfig
+	rec Recorder
+	now func() time.Time
+	log *slog.Logger
 
 	mu      sync.Mutex
 	routers map[routerKey]*routerEntry
-	invalid uint64
-	seen    uint64
+	bucket  *rate.Limiter
+
+	invalid, seen, overflow, suppressed uint64
 }
 
-// NewRAMonitor returns a monitor recording through rec; last_seen is flushed at most every flush.
-func NewRAMonitor(rec Recorder, flush time.Duration, now func() time.Time, log *slog.Logger) *RAMonitor {
-	return &RAMonitor{rec: rec, flush: flush, now: now, log: log, routers: map[routerKey]*routerEntry{}}
+// NewRAMonitor returns a monitor recording through rec.
+func NewRAMonitor(cfg RAMonitorConfig, rec Recorder, now func() time.Time, log *slog.Logger) *RAMonitor {
+	return &RAMonitor{
+		cfg: cfg, rec: rec, now: now, log: log,
+		routers: map[routerKey]*routerEntry{},
+		bucket:  rate.NewLimiter(rate.Limit(cfg.EventRate), cfg.EventBurst),
+	}
 }
 
-// Load seeds the monitor from stored rows without emitting events.
+// Load seeds the monitor from stored rows without emitting events. Routers
+// idle for Idle or longer are skipped, and at most MaxRouters are kept.
 func (m *RAMonitor) Load(rows []store.Router) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := m.now()
 	for _, r := range rows {
-		k := routerKey{r.Link, r.VLAN, r.MAC, r.Addr}
-		if _, ok := m.routers[k]; !ok {
-			m.routers[k] = &routerEntry{Router: r, lastWrite: now}
+		if now.Sub(r.LastSeen) >= m.cfg.Idle {
+			continue
 		}
+		k := routerKey{r.Link, r.VLAN, r.MAC, r.Addr}
+		if _, ok := m.routers[k]; ok {
+			continue
+		}
+		if len(m.routers) >= m.cfg.MaxRouters {
+			m.overflow++
+			continue
+		}
+		m.routers[k] = &routerEntry{Router: r, lastWrite: now}
 	}
 }
 
@@ -97,9 +133,14 @@ func (m *RAMonitor) Observe(ctx context.Context, p nd.Packet, link string) {
 	e, known := m.routers[k]
 	var typ string
 	if !known {
+		if len(m.routers) >= m.cfg.MaxRouters {
+			m.overflow++
+			m.mu.Unlock()
+			return
+		}
 		e = &routerEntry{Router: store.Router{
 			Link: k.link, VLAN: k.vlan, MAC: k.mac, Addr: k.addr, FirstSeen: now,
-		}}
+		}, lastWrite: now}
 		m.routers[k] = e
 		typ = event.RASeen
 	} else if e.Managed != p.RA.Managed || e.Other != p.RA.Other || !slices.Equal(e.Prefixes, prefixes) {
@@ -113,9 +154,13 @@ func (m *RAMonitor) Observe(ctx context.Context, p nd.Packet, link string) {
 		m.mu.Unlock()
 		return
 	}
-	ch := store.Change{
-		Events:     []event.Event{m.newEvent(typ, e, now)},
-		PutRouters: []store.Router{e.Router},
+	// A new or changed router's row is written now; its event only while the
+	// bucket allows.
+	ch := store.Change{PutRouters: []store.Router{e.Router}}
+	if m.bucket.AllowN(now, 1) {
+		ch.Events = []event.Event{m.newEvent(typ, e, now)}
+	} else {
+		m.suppressed++
 	}
 	gen := e.gen
 	m.mu.Unlock()
@@ -140,20 +185,31 @@ func (m *RAMonitor) Observe(ctx context.Context, p nd.Packet, link string) {
 	e.lastWrite = now
 }
 
-// Tick flushes dirty routers whose last write is at least flush old.
+// Tick flushes dirty routers whose last write is at least Flush old and drops
+// routers idle for Idle or longer from memory. Eviction logs nothing (there is
+// no ra.expire); the row stays in the database until retention removes it.
 func (m *RAMonitor) Tick(ctx context.Context) {
 	type pending struct {
+		k   routerKey
 		e   *routerEntry
 		gen uint64
 	}
 	m.mu.Lock()
 	now := m.now()
 	var ch store.Change
-	var flushed []pending
-	for _, e := range m.routers {
-		if e.dirty && now.Sub(e.lastWrite) >= m.flush {
+	var flushed, evicted []pending
+	for k, e := range m.routers {
+		idle := now.Sub(e.LastSeen) >= m.cfg.Idle
+		switch {
+		case idle && !e.dirty:
+			delete(m.routers, k)
+		case idle:
+			// Write its final last_seen first; evict once that succeeded.
 			ch.PutRouters = append(ch.PutRouters, e.Router)
-			flushed = append(flushed, pending{e, e.gen})
+			evicted = append(evicted, pending{k, e, e.gen})
+		case e.dirty && now.Sub(e.lastWrite) >= m.cfg.Flush:
+			ch.PutRouters = append(ch.PutRouters, e.Router)
+			flushed = append(flushed, pending{k, e, e.gen})
 		}
 	}
 	m.mu.Unlock()
@@ -170,10 +226,22 @@ func (m *RAMonitor) Tick(ctx context.Context) {
 		return
 	}
 	for _, p := range flushed {
+		if m.routers[p.k] != p.e {
+			continue
+		}
+		p.e.lastWrite = now
 		if p.e.gen == p.gen {
-			p.e.dirty, p.e.lastWrite = false, now
+			p.e.dirty = false
+		}
+	}
+	for _, p := range evicted {
+		if m.routers[p.k] != p.e {
+			continue
+		}
+		if p.e.gen == p.gen {
+			delete(m.routers, p.k)
 		} else {
-			p.e.lastWrite = now
+			p.e.lastWrite = now // seen again meanwhile: stays, still dirty
 		}
 	}
 }
@@ -182,5 +250,10 @@ func (m *RAMonitor) Tick(ctx context.Context) {
 func (m *RAMonitor) Counters() map[string]uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return map[string]uint64{"nd_invalid": m.invalid, "ra_seen_total": m.seen}
+	return map[string]uint64{
+		"nd_invalid":    m.invalid,
+		"ra_seen_total": m.seen,
+		"ra_overflow":   m.overflow,
+		"ra_suppressed": m.suppressed,
+	}
 }

@@ -58,6 +58,7 @@ type Sniffer struct {
 	LogLinkLocal   bool   `toml:"log_link_local"`  // default false
 	ProxyThreshold int    `toml:"proxy_threshold"` // default 32, min 2
 	MaxEntries     int    `toml:"max_entries"`     // default 100000, min 100
+	MaxRouters     int    `toml:"max_routers"`     // default 1000, min 10
 }
 
 // Idle returns IdleTimeout as a duration (0 if it does not parse).
@@ -104,6 +105,9 @@ func Load(path string) (*Config, error) {
 	if md.IsDefined("sniffer", "max_entries") && c.Sniffer.MaxEntries == 0 {
 		return nil, errors.New("config: sniffer.max_entries must be at least 100")
 	}
+	if md.IsDefined("sniffer", "max_routers") && c.Sniffer.MaxRouters == 0 {
+		return nil, errors.New("config: sniffer.max_routers must be at least 10")
+	}
 	// An explicit 0 is an error, not "use the default": it would otherwise
 	// silently mean 400 days to someone who asked for no retention.
 	if md.IsDefined("retention_days") && c.RetentionDays < 1 {
@@ -134,6 +138,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Sniffer.MaxEntries == 0 {
 		c.Sniffer.MaxEntries = 100000
+	}
+	if c.Sniffer.MaxRouters == 0 {
+		c.Sniffer.MaxRouters = 1000
 	}
 	if c.Vendor.EnterpriseNumber == 0 {
 		c.Vendor.EnterpriseNumber = 32473 // RFC 5612 documentation PEN; replace before production
@@ -203,6 +210,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Sniffer.MaxEntries < 100 {
 		return errors.New("config: sniffer.max_entries must be at least 100")
+	}
+	if c.Sniffer.MaxRouters < 10 {
+		return errors.New("config: sniffer.max_routers must be at least 10")
 	}
 	return nil
 }

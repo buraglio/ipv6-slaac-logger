@@ -89,11 +89,12 @@ func TestSnifferDefaultsAndLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Sniffer.Idle() != 24*time.Hour || c.Sniffer.LogLinkLocal || c.Sniffer.ProxyThreshold != 32 || c.Sniffer.MaxEntries != 100000 {
+	if c.Sniffer.Idle() != 24*time.Hour || c.Sniffer.LogLinkLocal || c.Sniffer.ProxyThreshold != 32 || c.Sniffer.MaxEntries != 100000 ||
+		c.Sniffer.MaxRouters != 1000 {
 		t.Fatalf("sniffer defaults = %+v", c.Sniffer)
 	}
-	c, err = Load(write(t, "[sniffer]\nidle_timeout=\"90m\"\nlog_link_local=true\nproxy_threshold=2\nmax_entries=100\n"))
-	if err != nil || c.Sniffer.Idle() != 90*time.Minute || !c.Sniffer.LogLinkLocal {
+	c, err = Load(write(t, "[sniffer]\nidle_timeout=\"90m\"\nlog_link_local=true\nproxy_threshold=2\nmax_entries=100\nmax_routers=10\n"))
+	if err != nil || c.Sniffer.Idle() != 90*time.Minute || !c.Sniffer.LogLinkLocal || c.Sniffer.MaxRouters != 10 {
 		t.Fatalf("explicit sniffer = %+v %v", c.Sniffer, err)
 	}
 	for name, body := range map[string]string{
@@ -103,6 +104,8 @@ func TestSnifferDefaultsAndLimits(t *testing.T) {
 		"threshold 0":      "[sniffer]\nproxy_threshold=0\n",
 		"max_entries 99":   "[sniffer]\nmax_entries=99\n",
 		"max_entries zero": "[sniffer]\nmax_entries=0\n",
+		"max_routers 9":    "[sniffer]\nmax_routers=9\n",
+		"max_routers zero": "[sniffer]\nmax_routers=0\n",
 	} {
 		if _, err := Load(write(t, body)); err == nil {
 			t.Errorf("%s: expected error", name)

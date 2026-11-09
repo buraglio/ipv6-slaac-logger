@@ -473,9 +473,16 @@ func (s *Store) SightingsWhere(ctx context.Context, field, value string) ([]Sigh
 	return s.querySightings(ctx, `SELECT `+sightingCols+` FROM sightings WHERE `+col+` = ? ORDER BY first_seen, mac, addr`, value)
 }
 
-// Routers returns all observed routers.
-func (s *Store) Routers(ctx context.Context) ([]Router, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+routerCols+` FROM routers ORDER BY link, vlan, mac, addr`)
+// Routers returns the observed routers last seen at or after since (the zero
+// time returns all of them).
+func (s *Store) Routers(ctx context.Context, since time.Time) ([]Router, error) {
+	q := `SELECT ` + routerCols + ` FROM routers`
+	var args []any
+	if !since.IsZero() {
+		q += ` WHERE last_seen >= ?`
+		args = append(args, since.UnixMilli())
+	}
+	rows, err := s.db.QueryContext(ctx, q+` ORDER BY link, vlan, mac, addr`, args...)
 	if err != nil {
 		return nil, err
 	}

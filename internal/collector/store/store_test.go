@@ -235,13 +235,27 @@ func TestRoutersRoundTrip(t *testing.T) {
 	commitOrFatal(t, s, Change{PutRouters: []Router{r}})
 	r.LastSeen = t0.Add(time.Hour)
 	commitOrFatal(t, s, Change{PutRouters: []Router{r}})
-	got, err := s.Routers(ctx)
+	got, err := s.Routers(ctx, time.Time{})
 	if err != nil || len(got) != 1 {
 		t.Fatalf("got %v err %v", got, err)
 	}
 	if !reflect.DeepEqual(got[0], Router{Link: "eth0", VLAN: 20, MAC: "aa", Addr: r.Addr, Managed: true, Other: false,
 		Prefixes: r.Prefixes, Lifetime: 1800, FirstSeen: t0, LastSeen: t0.Add(time.Hour)}) {
 		t.Errorf("got %+v", got[0])
+	}
+}
+
+// Warm start reads only routers seen since a cutoff, so a flood of stale
+// rows is not loaded back into memory.
+func TestRoutersSince(t *testing.T) {
+	s, _ := openTemp(t)
+	old := Router{Link: "eth0", MAC: "aa", Addr: netip.MustParseAddr("fe80::1"), Prefixes: []string{}, FirstSeen: t0, LastSeen: t0}
+	fresh := old
+	fresh.MAC, fresh.LastSeen = "bb", t0.Add(2*time.Hour)
+	commitOrFatal(t, s, Change{PutRouters: []Router{old, fresh}})
+	got, err := s.Routers(ctx, t0.Add(time.Hour))
+	if err != nil || len(got) != 1 || got[0].MAC != "bb" {
+		t.Fatalf("got %+v err %v", got, err)
 	}
 }
 
@@ -312,7 +326,7 @@ func TestPurgeStaleBefore(t *testing.T) {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
 	sg, _ := s.Sightings(ctx, true)
-	rt, _ := s.Routers(ctx)
+	rt, _ := s.Routers(ctx, time.Time{})
 	if len(sg) != 1 || len(rt) != 1 {
 		t.Errorf("remaining %d sightings %d routers", len(sg), len(rt))
 	}

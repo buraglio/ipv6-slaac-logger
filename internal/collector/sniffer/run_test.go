@@ -52,7 +52,7 @@ func newSniffer(t *testing.T, open func(string) (FrameSource, error)) (*Sniffer,
 		Link:    "eth0",
 		Open:    open,
 		Tracker: NewTracker(DefaultTrackerConfig(), trec, time.Now, log),
-		RA:      NewRAMonitor(rrec, 5*time.Minute, time.Now, log),
+		RA:      NewRAMonitor(DefaultRAMonitorConfig(), rrec, time.Now, log),
 		Log:     log,
 		backoff: func(int) time.Duration { return time.Millisecond },
 	}, trec, rrec, buf
