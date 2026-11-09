@@ -192,11 +192,20 @@ func writeState(path string, o Options, r Result) error {
 		tmp.Close()
 		return fmt.Errorf("duid: write state: %w", err)
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("duid: sync state: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("duid: write state: %w", err)
 	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		return fmt.Errorf("duid: write state: %w", err)
+	}
+	// Best effort: persist the rename itself (unsupported on Windows).
+	if d, err := os.Open(o.StateDir); err == nil {
+		_ = d.Sync()
+		d.Close()
 	}
 	return nil
 }
