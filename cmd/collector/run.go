@@ -173,12 +173,12 @@ func run(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func(n
 				log.Error("retention sweep failed", "err", err)
 				return
 			}
-			stale, err := st.PurgeStaleBefore(ctx, cutoff)
+			sightings, routers, err := st.PurgeStaleBefore(ctx, cutoff)
 			if err != nil {
 				log.Error("retention sweep failed", "err", err)
 				return
 			}
-			log.Info("retention sweep", "purged", n, "purged_sightings", stale)
+			log.Info("retention sweep", "purged", n, "purged_sightings", sightings, "purged_routers", routers)
 		})
 	})
 	wg.Go(func() {

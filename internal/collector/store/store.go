@@ -539,24 +539,22 @@ func (s *Store) HostsWhere(ctx context.Context, field, value string) ([]Host, er
 }
 
 // PurgeStaleBefore deletes sightings and routers last seen before t and
-// returns how many rows were removed in total.
-func (s *Store) PurgeStaleBefore(ctx context.Context, t time.Time) (int64, error) {
+// returns how many rows of each were removed.
+func (s *Store) PurgeStaleBefore(ctx context.Context, t time.Time) (sightings, routers int64, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
-	var total int64
-	for _, tbl := range []string{"sightings", "routers"} {
+	var n [2]int64
+	for i, tbl := range []string{"sightings", "routers"} {
 		res, err := tx.ExecContext(ctx, `DELETE FROM `+tbl+` WHERE last_seen < ?`, t.UnixMilli())
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return 0, err
+		if n[i], err = res.RowsAffected(); err != nil {
+			return 0, 0, err
 		}
-		total += n
 	}
-	return total, tx.Commit()
+	return n[0], n[1], tx.Commit()
 }

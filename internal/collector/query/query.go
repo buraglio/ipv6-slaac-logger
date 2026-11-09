@@ -85,8 +85,9 @@ func expiryOf(e event.Event) time.Time {
 // at, sorted and deduplicated. A MAC counts when an nd.new/nd.conflict ->
 // nd.expire window from events covers at (the window ends at the expire's
 // LastSeen, the last real sighting, not at the sweep time that stamped the
-// event), or when a live sighting's [FirstSeen, LastSeen] covers at. events
-// must be ordered by time. MACs with a proxy-suspect sighting are excluded.
+// event), or when a stored sighting's [FirstSeen, LastSeen] covers at (expired
+// rows included). events must be ordered by time. MACs with a proxy-suspect
+// sighting are excluded.
 func SightedAt(events []store.StoredEvent, current []store.Sighting, at time.Time) []string {
 	suspect := map[string]bool{}
 	set := map[string]bool{}
@@ -95,7 +96,9 @@ func SightedAt(events []store.StoredEvent, current []store.Sighting, at time.Tim
 			suspect[s.MAC] = true
 			continue
 		}
-		if !s.Expired && !s.FirstSeen.After(at) && !s.LastSeen.Before(at) {
+		// Expired rows count too: their [first_seen, last_seen] is accurate,
+		// and their nd.expire may never have been logged.
+		if !s.FirstSeen.After(at) && !s.LastSeen.Before(at) {
 			set[s.MAC] = true
 		}
 	}

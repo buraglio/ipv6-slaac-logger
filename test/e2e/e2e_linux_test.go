@@ -359,6 +359,8 @@ func TestSnifferEndToEnd(t *testing.T) {
 	c := startCollector(t, state, "sniff")
 	stdout := c.stdout
 	mac := linkMAC(t, "ral-h", "veth-h")
+	// The capture socket must be open before the DAD probe is sent.
+	c.stderr.waitFor(t, 10*time.Second, "sniffer capturing", "link=veth-c")
 
 	// DAD: a new address with DAD enabled sends an NS from ::.
 	sh(t, "ip", "-n", "ral-h", "-6", "addr", "add", "2001:db8:10::200/64", "dev", "veth-h")

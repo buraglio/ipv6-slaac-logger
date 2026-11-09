@@ -119,14 +119,17 @@ func TestSightedAt(t *testing.T) {
 			t.Errorf("at %v: got %v want %v", c.at, got, c.want)
 		}
 	}
-	// Proxy suspects and expired rows never count; duplicates collapse and sort.
+	// Proxy suspects never count. An expired row's [first_seen, last_seen]
+	// is still accurate, so it counts inside its window (its nd.expire may
+	// never have been logged). Duplicates collapse and sort.
 	cur := []store.Sighting{
 		{MAC: "P", FirstSeen: h(1), LastSeen: h(20), ProxySuspect: true},
 		{MAC: "X", FirstSeen: h(1), LastSeen: h(20), Expired: true},
+		{MAC: "Y", FirstSeen: h(1), LastSeen: h(5), Expired: true},
 		{MAC: "B", FirstSeen: h(1), LastSeen: h(20)},
 		{MAC: "A", FirstSeen: h(1), LastSeen: h(20)},
 	}
-	if got := SightedAt(evs, cur, h(11)); len(got) != 2 || got[0] != "A" || got[1] != "B" {
+	if got := SightedAt(evs, cur, h(11)); len(got) != 3 || got[0] != "A" || got[1] != "B" || got[2] != "X" {
 		t.Errorf("got %v", got)
 	}
 }

@@ -321,9 +321,9 @@ func TestPurgeStaleBefore(t *testing.T) {
 		PutSightings: []Sighting{sampleSighting("aa", addrA), func() Sighting { x := sampleSighting("bb", addrB); x.LastSeen = t0.Add(2 * time.Hour); return x }()},
 		PutRouters:   []Router{old, fresh},
 	})
-	n, err := s.PurgeStaleBefore(ctx, t0.Add(time.Hour))
-	if err != nil || n != 2 {
-		t.Fatalf("n=%d err=%v", n, err)
+	ns, nr, err := s.PurgeStaleBefore(ctx, t0.Add(time.Hour))
+	if err != nil || ns != 1 || nr != 1 {
+		t.Fatalf("sightings=%d routers=%d err=%v", ns, nr, err)
 	}
 	sg, _ := s.Sightings(ctx, true)
 	rt, _ := s.Routers(ctx, time.Time{})

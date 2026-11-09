@@ -3,6 +3,7 @@ package sniffer
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"strings"
@@ -172,5 +173,35 @@ func TestSnifferReopensAfterReadError(t *testing.T) {
 	defer mu.Unlock()
 	if calls != n+1 {
 		t.Errorf("open calls = %d, want %d", calls, n+1)
+	}
+}
+
+func TestSnifferLogsCapturing(t *testing.T) {
+	s, _, _, buf := newSniffer(t, func(string) (FrameSource, error) { return &fakeSource{}, nil })
+	runFor(t, s, func() bool { return strings.Contains(buf.String(), "sniffer capturing") })
+	out := buf.String()
+	if !strings.Contains(out, "level=INFO") || !strings.Contains(out, `msg="sniffer capturing" link=eth0`) {
+		t.Fatalf("no capture-start log:\n%s", out)
+	}
+}
+
+// Off Linux, Open reports errors.ErrUnsupported: Run logs that once and
+// returns instead of retrying forever.
+func TestSnifferUnsupportedStops(t *testing.T) {
+	calls := 0
+	s, _, _, buf := newSniffer(t, func(string) (FrameSource, error) {
+		calls++
+		return nil, errors.ErrUnsupported
+	})
+	done := make(chan struct{})
+	go func() { s.Run(context.Background()); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run kept retrying an unsupported capture")
+	}
+	out := buf.String()
+	if calls != 1 || strings.Count(out, "sniffing unsupported on this OS") != 1 || strings.Contains(out, "retrying") {
+		t.Fatalf("calls=%d log:\n%s", calls, out)
 	}
 }

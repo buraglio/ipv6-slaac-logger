@@ -3,6 +3,7 @@
 package sniffer
 
 import (
+	"encoding/binary"
 	"os"
 	"testing"
 	"unsafe"
@@ -43,5 +44,14 @@ func TestOpenRequiresPrivilege(t *testing.T) {
 	if src, err := Open("lo"); err == nil {
 		_ = src.Close()
 		t.Fatal("expected error as non-root")
+	}
+}
+
+// htons must lay its result out in memory as big-endian bytes on any host.
+func TestHtons(t *testing.T) {
+	var b [2]byte
+	binary.NativeEndian.PutUint16(b[:], htons(0x86dd))
+	if b != [2]byte{0x86, 0xdd} {
+		t.Fatalf("htons(0x86dd) in memory = % x", b)
 	}
 }

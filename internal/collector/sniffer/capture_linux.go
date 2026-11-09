@@ -3,6 +3,7 @@
 package sniffer
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -16,8 +17,13 @@ type afPacket struct {
 	fd int
 }
 
-// htons converts a host-order uint16 to network order.
-func htons(v uint16) uint16 { return v<<8 | v>>8 }
+// htons converts a host-order uint16 to network order: the returned value,
+// stored in host order, has v's big-endian bytes. Correct on any endianness.
+func htons(v uint16) uint16 {
+	var b [2]byte
+	binary.BigEndian.PutUint16(b[:], v)
+	return binary.NativeEndian.Uint16(b[:])
+}
 
 // Open opens a promiscuous AF_PACKET socket on ifname with the ND BPF filter attached.
 func Open(ifname string) (FrameSource, error) {

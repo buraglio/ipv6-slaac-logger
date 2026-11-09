@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/netip"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -144,9 +145,16 @@ func (s *syncBuf) String() string {
 	return s.b.String()
 }
 
-// A sniff interface that does not exist (or cannot be opened, as off Linux)
-// must not stop the collector: it starts, warns once, and shuts down cleanly.
+// A sniff interface that does not exist must not stop the collector: it
+// starts, warns once (retrying in the background), and shuts down cleanly.
+// Off Linux the sniffer instead warns once that sniffing is unsupported and
+// stops; the collector still runs. (The retry loop itself is covered with a
+// fake Open in the sniffer package on every OS.)
 func TestRunSniffersRetriesMissingInterface(t *testing.T) {
+	want := "sniffer capture failed"
+	if runtime.GOOS != "linux" {
+		want = "sniffing unsupported on this OS"
+	}
 	probe, err := net.ListenPacket("udp6", "[::1]:0")
 	if err != nil {
 		t.Skipf("no IPv6 loopback: %v", err)
@@ -176,7 +184,7 @@ func TestRunSniffersRetriesMissingInterface(t *testing.T) {
 		t.Fatal("collector did not become ready")
 	}
 	deadline := time.Now().Add(5 * time.Second)
-	for !strings.Contains(logs.String(), "sniffer capture failed") && time.Now().Before(deadline) {
+	for !strings.Contains(logs.String(), want) && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	cancel()
@@ -184,8 +192,8 @@ func TestRunSniffersRetriesMissingInterface(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 	out := logs.String()
-	if n := strings.Count(out, "sniffer capture failed"); n != 1 || !strings.Contains(out, "does-not-exist0") || !strings.Contains(out, "level=WARN") {
-		t.Fatalf("want exactly one sniffer open warning naming the interface, got %d in:\n%s", n, out)
+	if n := strings.Count(out, want); n != 1 || !strings.Contains(out, "does-not-exist0") || !strings.Contains(out, "level=WARN") {
+		t.Fatalf("want exactly one %q warning naming the interface, got %d in:\n%s", want, n, out)
 	}
 }
 

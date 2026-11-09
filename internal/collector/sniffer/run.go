@@ -61,7 +61,7 @@ func (s *Sniffer) wait(ctx context.Context, attempt int) bool {
 }
 
 // Run opens the interface (retrying with backoff), reads and dispatches frames,
-// and returns only when ctx is done.
+// and returns when ctx is done, or at once if capture is unsupported on this OS.
 func (s *Sniffer) Run(ctx context.Context) {
 	open := s.Open
 	if open == nil {
@@ -84,12 +84,18 @@ func (s *Sniffer) Run(ctx context.Context) {
 
 	for ctx.Err() == nil {
 		src, err := open(s.Link)
+		if errors.Is(err, errors.ErrUnsupported) {
+			// Off Linux there is nothing to retry.
+			log.Warn("sniffing unsupported on this OS", "link", s.Link)
+			return
+		}
 		if err != nil {
 			if !fail(err) {
 				return
 			}
 			continue
 		}
+		log.Info("sniffer capturing", "link", s.Link)
 		err = s.read(ctx, src, buf, func() {
 			if failures > 0 {
 				log.Info("sniffer capture recovered", "link", s.Link, "failures", failures)
