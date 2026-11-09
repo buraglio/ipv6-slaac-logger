@@ -35,7 +35,6 @@
   - `actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1`
   - `actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0`
 - Tool versions: staticcheck `2026.2.2`, govulncheck `v1.9.0`.
-- Every commit message ends with a blank line and then `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. The `git commit` commands below pass it as a second `-m`.
 
 ## Spec interpretation notes (decided while planning)
 
@@ -633,7 +632,7 @@ Expected: PASS, and the fuzz run reports no failures.
 
 ```bash
 git add go.mod .gitignore .github/workflows/ci.yml internal/dhcp6
-git commit -m "feat(dhcp6): option and message codec, CI workflow" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(dhcp6): option and message codec, CI workflow"
 ```
 
 ---
@@ -1193,7 +1192,7 @@ Expected: PASS.
 
 ```bash
 git add internal/dhcp6
-git commit -m "feat(dhcp6): IA address, vendor class, FQDN, DUID helpers and ADDR-REG-INFORM builder" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(dhcp6): IA address, vendor class, FQDN, DUID helpers and ADDR-REG-INFORM builder"
 ```
 
 ---
@@ -1420,7 +1419,7 @@ Expected: PASS.
 
 ```bash
 git add internal/event
-git commit -m "feat(event): shared forensic record schema" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(event): shared forensic record schema"
 ```
 
 ---
@@ -1965,7 +1964,7 @@ Expected: PASS. If `TestPersistsAndReadOnly` fails because the DSN query string 
 
 ```bash
 git add go.mod go.sum internal/collector/store
-git commit -m "feat(store): SQLite events, bindings and forwarder cursors" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(store): SQLite events, bindings and forwarder cursors"
 ```
 
 ---
@@ -2439,7 +2438,7 @@ Expected: PASS. `TestUnixSink` is skipped on Windows.
 
 ```bash
 git add internal/collector/logger
-git commit -m "feat(logger): RFC 3164/5424 formatting and unix, TCP/TLS, writer sinks" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(logger): RFC 3164/5424 formatting and unix, TCP/TLS, writer sinks"
 ```
 
 ---
@@ -2849,7 +2848,7 @@ Expected: PASS.
 
 ```bash
 git add internal/collector/logger internal/collector/recorder
-git commit -m "feat(logger): at-least-once forwarder with cursors; recorder with sink fallback" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(logger): at-least-once forwarder with cursors; recorder with sink fallback"
 ```
 
 ---
@@ -3367,7 +3366,7 @@ Expected: PASS.
 
 ```bash
 git add go.mod go.sum internal/collector/registrar
-git commit -m "feat(registrar): RFC 9686 validation, prefix policy and rate limits" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(registrar): RFC 9686 validation, prefix policy and rate limits"
 ```
 
 ---
@@ -4077,7 +4076,7 @@ Expected: PASS.
 
 ```bash
 git add internal/collector/registrar
-git commit -m "feat(registrar): bindings, ADDR-REG-REPLY, conflicts, dereg, expiry, bounded reject logging" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(registrar): bindings, ADDR-REG-REPLY, conflicts, dereg, expiry, bounded reject logging"
 ```
 
 ---
@@ -4225,7 +4224,7 @@ Expected: PASS.
 
 ```bash
 git add internal/collector/responder
-git commit -m "feat(responder): answer Information-Request with option 148" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(responder): answer Information-Request with option 148"
 ```
 
 ---
@@ -4795,7 +4794,7 @@ Expected: PASS. `TestServeRoundTrip` passes, or is skipped only if `[::1]` can't
 
 ```bash
 git add go.mod go.sum internal/collector/listener
-git commit -m "feat(listener): dispatch, relay unwrap/wrap, UDP 547 socket with ff02::1:2" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(listener): dispatch, relay unwrap/wrap, UDP 547 socket with ff02::1:2"
 ```
 
 ---
@@ -5309,7 +5308,7 @@ Expected: PASS.
 
 ```bash
 git add go.mod go.sum internal/collector/config internal/collector/netinfo internal/collector/serverid
-git commit -m "feat(collector): TOML config, on-link prefix discovery, persistent server DUID" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(collector): TOML config, on-link prefix discovery, persistent server DUID"
 ```
 
 ---
@@ -5767,7 +5766,7 @@ Expected: PASS.
 
 ```bash
 git add cmd/collector
-git commit -m "feat(collector): run command wiring store, forwarders, registrar, responder, listener" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(collector): run command wiring store, forwarders, registrar, responder, listener"
 ```
 
 ---
@@ -6176,7 +6175,7 @@ Expected: PASS.
 
 ```bash
 git add internal/collector/query cmd/collector/query.go cmd/collector/query_test.go
-git commit -m "feat(collector): query command with holder-at-time reconstruction" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(collector): query command with holder-at-time reconstruction"
 ```
 
 ---
@@ -6587,7 +6586,7 @@ Expected: PASS.
 
 ```bash
 git add cmd/regsend
-git commit -m "feat(regsend): developer tool for valid and malformed registrations" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(regsend): developer tool for valid and malformed registrations"
 ```
 
 ---
@@ -7077,5 +7076,5 @@ Expected: everything passes, and the static build succeeds.
 
 ```bash
 git add packaging internal/collector/config/example_test.go test/e2e .github/workflows/ci.yml README.md
-git commit -m "feat: systemd/rsyslog packaging, Linux netns end-to-end test, e2e CI job, README" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat: systemd/rsyslog packaging, Linux netns end-to-end test, e2e CI job, README"
 ```
