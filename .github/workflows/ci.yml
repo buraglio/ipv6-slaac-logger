@@ -89,14 +89,15 @@ jobs:
       # Kea 3.0 from ISC's Cloudsmith "kea-3-0" repository, added explicitly
       # instead of piping ISC's setup script into bash. See
       # https://kea.readthedocs.io/en/latest/arm/install.html#installation-from-packages
-      # and https://cloudsmith.io/~isc/repos/kea-3-0/setup/. The package name
-      # isc-kea-dhcp6 is the one ISC documents; verify it on the first run.
+      # and https://cloudsmith.io/~isc/repos/kea-3-0/setup/. The package
+      # isc-kea-dhcp6 is listed in ISC's install docs (the systemd service is
+      # named isc-kea-dhcp6-server, the package is not).
       - name: Install Kea 3.0 (ISC Cloudsmith repository)
         run: |
           set -euo pipefail
-          curl -1sLf https://dl.cloudsmith.io/public/isc/kea-3-0/gpg.key \
-            | sudo gpg --dearmor -o /usr/share/keyrings/isc-kea-3-0.gpg
-          echo "deb [signed-by=/usr/share/keyrings/isc-kea-3-0.gpg] https://dl.cloudsmith.io/public/isc/kea-3-0/deb/ubuntu $(lsb_release -cs) main" \
+          curl -1sLf https://dl.cloudsmith.io/public/isc/kea-3-0/gpg.B16C44CD45514C3C.key \
+            | sudo gpg --dearmor -o /usr/share/keyrings/isc-kea-3-0-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/isc-kea-3-0-archive-keyring.gpg] https://dl.cloudsmith.io/public/isc/kea-3-0/deb/ubuntu $(lsb_release -cs) main" \
             | sudo tee /etc/apt/sources.list.d/isc-kea-3-0.list
           sudo apt-get update
           sudo apt-get install -y isc-kea-dhcp6

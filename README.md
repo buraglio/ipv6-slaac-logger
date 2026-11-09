@@ -131,7 +131,7 @@ sudo -E env PATH=$PATH go test -tags e2e -v ./test/e2e     # Linux network-names
 The CI job `interop-kea` runs the agent against ISC Kea 3.0 in network
 namespaces. Kea 3.0 has no `allow-address-registration` key (3.1.4 and later add
 it, default on). Do not put Kea and the collector's `responder` role on the same
-link, or two servers answer the same registration. The Android procedure is in
+link, or two servers answer the same registration (see spec §10 item 3). The Android procedure is in
 [docs/android-interop.md](docs/android-interop.md).
 
 ## Known limitations

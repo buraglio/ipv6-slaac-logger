@@ -30,7 +30,11 @@ func TestAgentKeaInterop(t *testing.T) {
 	leases := filepath.Join(dir, "leases6.csv")
 	keaCfg := fmt.Sprintf(`{
   "Dhcp6": {
-    "interfaces-config": { "interfaces": ["veth-c"] },
+    "interfaces-config": {
+      "interfaces": ["veth-c"],
+      "service-sockets-max-retries": 5,
+      "service-sockets-retry-wait-time": 1000
+    },
     "lease-database": { "type": "memfile", "name": %q, "lfc-interval": 0 },
     "subnet6": [
       { "id": 1, "subnet": "2001:db8:10::/64", "interface": "veth-c" }
@@ -47,11 +51,14 @@ func TestAgentKeaInterop(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	waitLinkLocal(t, "ral-c", "veth-c", 10*time.Second)
+
 	k := &proc{stdout: &lineLog{}, stderr: &lineLog{}, done: make(chan struct{})}
 	k.cmd = exec.Command("ip", "netns", "exec", "ral-c", kea, "-c", keaCfgPath)
-	// Kea restricts where it writes lease, PID and lock files unless told otherwise.
+	// Kea 3.0 only loads lease files from its compiled-in data directory unless
+	// KEA_DHCP_DATA_DIR overrides it; PID and lock files have their own variables.
 	k.cmd.Env = append(os.Environ(),
-		"KEA_LEASE_DIR="+dir, "KEA_PIDFILE_DIR="+dir, "KEA_LOCKFILE_DIR="+dir)
+		"KEA_DHCP_DATA_DIR="+dir, "KEA_PIDFILE_DIR="+dir, "KEA_LOCKFILE_DIR="+dir)
 	k.cmd.Stdout, k.cmd.Stderr = k.stdout, k.stderr
 	if err := k.cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -117,8 +124,9 @@ func TestAgentKeaInterop(t *testing.T) {
 	}
 
 	a.stderr.mu.Lock()
-	defer a.stderr.mu.Unlock()
-	for _, ln := range a.stderr.lines {
+	lines := append([]string(nil), a.stderr.lines...)
+	a.stderr.mu.Unlock()
+	for _, ln := range lines {
 		if strings.Contains(ln, "send failed") {
 			t.Errorf("agent logged a send failure: %s", ln)
 		}
@@ -137,4 +145,21 @@ func logHas(p *proc, sub string) bool {
 		l.mu.Unlock()
 	}
 	return false
+}
+
+// waitLinkLocal waits until ifname in ns has a non-tentative link-local
+// address, so that Kea can bind its socket as soon as it starts.
+func waitLinkLocal(t *testing.T, ns, ifname string, timeout time.Duration) {
+	t.Helper()
+	var out string
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		b, _ := exec.Command("ip", "-n", ns, "-6", "addr", "show", "dev", ifname, "scope", "link").CombinedOutput()
+		out = string(b)
+		if strings.Contains(out, "inet6 fe80:") && !strings.Contains(out, "tentative") {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Fatalf("no non-tentative link-local on %s/%s within %v; last ip output:\n%s", ns, ifname, timeout, out)
 }
