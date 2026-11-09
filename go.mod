@@ -4,9 +4,11 @@ go 1.26.0
 
 require (
 	github.com/BurntSushi/toml v1.6.0
+	github.com/kardianos/service v1.3.0
 	golang.org/x/net v0.62.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/time v0.16.0
+	howett.net/plist v1.0.1
 	modernc.org/sqlite v1.62.0
 )
 

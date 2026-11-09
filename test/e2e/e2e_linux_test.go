@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -35,7 +34,7 @@ func TestMain(m *testing.M) {
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		for _, b := range []string{"collector", "regsend"} {
+		for _, b := range []string{"collector", "regsend", "agent"} {
 			out, err := exec.Command("go", "build", "-o", filepath.Join(dir, b), "../../cmd/"+b).CombinedOutput()
 			if err != nil {
 				fmt.Printf("build %s: %v\n%s", b, err, out)
@@ -132,15 +131,15 @@ func (l *lineLog) waitFor(t *testing.T, timeout time.Duration, subs ...string) s
 	return ""
 }
 
-// collectorProc is a running collector and its captured output.
-type collectorProc struct {
+// proc is a running binary (collector or agent) and its captured output.
+type proc struct {
 	cmd            *exec.Cmd
 	stdout, stderr *lineLog
 	done           chan struct{} // closed when the process has exited
 }
 
 // stop sends SIGTERM and waits up to 10s for exit, then kills the process.
-func (c *collectorProc) stop(t *testing.T) {
+func (c *proc) stop(t *testing.T) {
 	t.Helper()
 	select {
 	case <-c.done:
@@ -151,7 +150,7 @@ func (c *collectorProc) stop(t *testing.T) {
 	select {
 	case <-c.done:
 	case <-time.After(10 * time.Second):
-		t.Logf("collector did not exit within 10s of SIGTERM; killing it")
+		t.Logf("process did not exit within 10s of SIGTERM; killing it")
 		_ = c.cmd.Process.Kill()
 		<-c.done
 	}
@@ -161,13 +160,13 @@ func (l *lineLog) dump(t *testing.T, name string) {
 	t.Helper()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	t.Logf("collector %s (%d lines):\n%s", name, len(l.lines), strings.Join(l.lines, "\n"))
+	t.Logf("%s (%d lines):\n%s", name, len(l.lines), strings.Join(l.lines, "\n"))
 	if len(l.buf) > 0 {
-		t.Logf("collector %s (partial line): %s", name, l.buf)
+		t.Logf("%s (partial line): %s", name, l.buf)
 	}
 }
 
-func startCollector(t *testing.T, state string, roles ...string) *collectorProc {
+func startCollector(t *testing.T, state string, roles ...string) *proc {
 	t.Helper()
 	all := append([]string{"listen", "responder"}, roles...)
 	quoted := make([]string, len(all))
@@ -191,7 +190,7 @@ type = "stdout"
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c := &collectorProc{stdout: &lineLog{}, stderr: &lineLog{}, done: make(chan struct{})}
+	c := &proc{stdout: &lineLog{}, stderr: &lineLog{}, done: make(chan struct{})}
 	c.cmd = exec.Command("ip", "netns", "exec", "ral-c", filepath.Join(binDir, "collector"), "run", "-config", cfgPath)
 	c.cmd.Stdout, c.cmd.Stderr = c.stdout, c.stderr
 	if err := c.cmd.Start(); err != nil {
@@ -204,13 +203,121 @@ type = "stdout"
 	// Cleanups run last-in first-out: stop the collector, then dump its output.
 	t.Cleanup(func() {
 		if t.Failed() {
-			c.stdout.dump(t, "stdout")
-			c.stderr.dump(t, "stderr")
+			c.stdout.dump(t, "collector stdout")
+			c.stderr.dump(t, "collector stderr")
 		}
 	})
 	t.Cleanup(func() { c.stop(t) })
 	c.stderr.waitFor(t, 5*time.Second, "collector started")
 	return c
+}
+
+// startRadvd runs radvd in namespace ns, advertising prefix on ifname with the
+// O flag set. It is killed at cleanup.
+func startRadvd(t *testing.T, ns, ifname, prefix string) {
+	t.Helper()
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "radvd.conf")
+	pidPath := filepath.Join(dir, "radvd.pid")
+	cfg := fmt.Sprintf(`interface %s {
+	AdvSendAdvert on;
+	MinRtrAdvInterval 3;
+	MaxRtrAdvInterval 4;
+	AdvOtherConfigFlag on;
+	prefix %s {
+		AdvOnLink on;
+		AdvAutonomous on;
+	};
+};
+`, ifname, prefix)
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sh(t, "ip", "netns", "exec", ns, "sysctl", "-w", "net.ipv6.conf.all.forwarding=1")
+	r := &proc{stdout: &lineLog{}, stderr: &lineLog{}, done: make(chan struct{})}
+	r.cmd = exec.Command("ip", "netns", "exec", ns, "radvd", "-n", "-m", "stderr", "-C", cfgPath, "-p", pidPath)
+	r.cmd.Stdout, r.cmd.Stderr = r.stdout, r.stderr
+	if err := r.cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		_ = r.cmd.Wait()
+		close(r.done)
+	}()
+	t.Cleanup(func() {
+		if t.Failed() {
+			r.stderr.dump(t, "radvd stderr")
+		}
+	})
+	t.Cleanup(func() { r.stop(t) })
+}
+
+// startAgent runs the agent in the ral-h namespace with the config file cfgPath.
+func startAgent(t *testing.T, cfgPath string) *proc {
+	t.Helper()
+	a := &proc{stdout: &lineLog{}, stderr: &lineLog{}, done: make(chan struct{})}
+	a.cmd = exec.Command("ip", "netns", "exec", "ral-h", filepath.Join(binDir, "agent"), "-config", cfgPath, "run")
+	a.cmd.Stdout, a.cmd.Stderr = a.stdout, a.stderr
+	if err := a.cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		_ = a.cmd.Wait()
+		close(a.done)
+	}()
+	t.Cleanup(func() {
+		if t.Failed() {
+			a.stdout.dump(t, "agent stdout")
+			a.stderr.dump(t, "agent stderr")
+		}
+	})
+	t.Cleanup(func() { a.stop(t) })
+	return a
+}
+
+// fieldAfter returns the whitespace-separated field following key in line.
+func fieldAfter(line, key string) string {
+	f := strings.Fields(line)
+	for i := 0; i+1 < len(f); i++ {
+		if f[i] == key {
+			return f[i+1]
+		}
+	}
+	return ""
+}
+
+// waitSLAAC polls ns for a non-tentative, non-temporary dynamic global address
+// on ifname and returns it without the prefix length.
+func waitSLAAC(t *testing.T, ns, ifname string, timeout time.Duration) string {
+	t.Helper()
+	var out string
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		b, _ := exec.Command("ip", "-n", ns, "-6", "-o", "addr", "show", "dev", ifname, "scope", "global", "dynamic").CombinedOutput()
+		out = string(b)
+		for _, ln := range strings.Split(out, "\n") {
+			if strings.Contains(ln, "tentative") || strings.Contains(ln, "temporary") {
+				continue
+			}
+			if a := fieldAfter(ln, "inet6"); a != "" {
+				return strings.SplitN(a, "/", 2)[0]
+			}
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	t.Fatalf("no SLAAC address on %s/%s within %v; last ip output:\n%s", ns, ifname, timeout, out)
+	return ""
+}
+
+// linkMAC returns the link-layer address of ifname in ns.
+func linkMAC(t *testing.T, ns, ifname string) string {
+	t.Helper()
+	out := sh(t, "ip", "-n", ns, "-o", "link", "show", ifname)
+	mac := fieldAfter(out, "link/ether")
+	if mac == "" {
+		t.Fatalf("no MAC for %s in ip output: %s", ifname, out)
+	}
+	return strings.ToLower(mac)
 }
 
 func regsend(args ...string) (string, int) {
@@ -281,57 +388,67 @@ func TestCollectorEndToEnd(t *testing.T) {
 	})
 }
 
-// startRadvd runs radvd in ns, advertising prefix on ifname, until test cleanup.
-func startRadvd(t *testing.T, ns, ifname, prefix string) {
-	t.Helper()
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "radvd.conf")
-	pidPath := filepath.Join(dir, "radvd.pid")
-	cfg := fmt.Sprintf(`interface %s {
-	AdvSendAdvert on;
-	MinRtrAdvInterval 3;
-	MaxRtrAdvInterval 4;
-	AdvOtherConfigFlag on;
-	prefix %s {
-		AdvOnLink on;
-		AdvAutonomous on;
-	};
-};
-`, ifname, prefix)
-	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+func TestAgentEndToEnd(t *testing.T) {
+	setupNetns(t)
+	c := startCollector(t, t.TempDir())
+	startRadvd(t, "ral-c", "veth-c", "2001:db8:10::/64")
+
+	slaac := waitSLAAC(t, "ral-h", "veth-h", 15*time.Second)
+	mac := linkMAC(t, "ral-h", "veth-h")
+	t.Logf("slaac=%s mac=%s", slaac, mac)
+
+	state := t.TempDir()
+	cfgPath := filepath.Join(state, "agent.toml")
+	cfg := fmt.Sprintf("state_dir = %q\ncollectors = [\"2001:db8:10::1\"]\nheartbeat = \"1m\"\n", state)
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	sh(t, "ip", "netns", "exec", ns, "sysctl", "-w", "net.ipv6.conf.all.forwarding=1")
-	cmd := exec.Command("ip", "netns", "exec", ns, "radvd", "-n", "-m", "stderr", "-C", cfgPath, "-p", pidPath)
-	var out bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
+
+	a := startAgent(t, cfgPath)
+	started := a.stderr.waitFor(t, 10*time.Second, "agent started", "duid=")
+	if !strings.Contains(started, "duid_source=generated") {
+		t.Fatalf("first start: want duid_source=generated, got: %s", started)
 	}
-	done := make(chan struct{})
-	go func() {
-		_ = cmd.Wait()
-		close(done)
-	}()
-	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
-		<-done
-		if t.Failed() {
-			t.Logf("radvd output:\n%s", out.String())
+	duid1 := fieldValue(started, "duid")
+
+	for _, addr := range []string{slaac, "2001:db8:10::100"} {
+		c.stdout.waitFor(t, 20*time.Second, `"event":"reg.add"`, `"addr":"`+addr+`"`,
+			`"origin":"agent"`, `"mac":"`+mac+`"`)
+	}
+
+	c.stdout.mu.Lock()
+	for _, ln := range c.stdout.lines {
+		if strings.Contains(ln, `"event":"reg.add"`) && strings.Contains(ln, `"addr":"fe80:`) {
+			t.Errorf("link-local address was registered: %s", ln)
 		}
-	})
+	}
+	c.stdout.mu.Unlock()
+
+	a.stop(t)
+	time.Sleep(2 * time.Second)
+	c.stdout.mu.Lock()
+	for _, ln := range c.stdout.lines {
+		if strings.Contains(ln, `"event":"reg.dereg"`) {
+			t.Errorf("unexpected de-registration after agent stop: %s", ln)
+		}
+	}
+	c.stdout.mu.Unlock()
+
+	a2 := startAgent(t, cfgPath)
+	started2 := a2.stderr.waitFor(t, 10*time.Second, "agent started", "duid=")
+	if duid2 := fieldValue(started2, "duid"); duid1 == "" || duid2 != duid1 {
+		t.Fatalf("DUID changed across restart: %q -> %q", duid1, duid2)
+	}
 }
 
-var macRE = regexp.MustCompile(`link/ether ([0-9a-f]{2}(?::[0-9a-f]{2}){5})`)
-
-func linkMAC(t *testing.T, ns, ifname string) string {
-	t.Helper()
-	out := sh(t, "ip", "-n", ns, "-o", "link", "show", ifname)
-	m := macRE.FindStringSubmatch(strings.ToLower(out))
-	if m == nil {
-		t.Fatalf("no MAC in %q", out)
+// fieldValue returns the value of key=value in a logfmt-style line.
+func fieldValue(line, key string) string {
+	for _, f := range strings.Fields(line) {
+		if v, ok := strings.CutPrefix(f, key+"="); ok {
+			return strings.Trim(v, `"`)
+		}
 	}
-	return m[1]
+	return ""
 }
 
 func (l *lineLog) count(subs ...string) int {
