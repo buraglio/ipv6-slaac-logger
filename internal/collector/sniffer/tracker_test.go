@@ -496,3 +496,27 @@ func TestTrackerNewEntryNotFlushedWhileInFlight(t *testing.T) {
 		t.Fatalf("changes = %d, want 1", n)
 	}
 }
+
+// Flush writes every dirty row now, regardless of the interval, and emits
+// nothing; it is called on shutdown so the database's last_seen does not lag.
+func TestTrackerFlush(t *testing.T) {
+	tr, rec, clk, _ := newTestTracker(t, DefaultTrackerConfig())
+	ctx := context.Background()
+	o := obs(t, "aa:bb:cc:00:00:01", "2001:db8::1")
+	tr.Observe(ctx, o)
+	tr.Observe(ctx, obs(t, "aa:bb:cc:00:00:02", "2001:db8::2")) // stays clean
+	clk.t = clk.t.Add(time.Minute)
+	tr.Observe(ctx, o)
+	tr.Tick(ctx) // within the flush interval: nothing written
+	before := len(rec.all())
+	tr.Flush(ctx)
+	cs := rec.all()
+	if len(cs) != before+1 || len(cs[before].Events) != 0 || len(cs[before].PutSightings) != 1 ||
+		!cs[before].PutSightings[0].LastSeen.Equal(clk.t) || cs[before].PutSightings[0].Expired {
+		t.Fatalf("flush changes = %+v", cs[before:])
+	}
+	tr.Flush(ctx)
+	if len(rec.all()) != before+1 {
+		t.Fatal("second flush wrote again")
+	}
+}

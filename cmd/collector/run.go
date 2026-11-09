@@ -204,6 +204,11 @@ func run(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func(n
 	err = conn.Serve(ctx, disp)
 	cancel()
 	wg.Wait()
+	// Write the last_seen of repeat sightings and routers still waiting for
+	// their flush interval, before the deferred store and sink closes.
+	fctx := context.WithoutCancel(ctx)
+	tracker.Flush(fctx)
+	ramon.Flush(fctx)
 	return err
 }
 

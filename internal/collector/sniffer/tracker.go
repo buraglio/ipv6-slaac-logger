@@ -291,7 +291,13 @@ func (t *Tracker) Observe(ctx context.Context, o Observation) {
 }
 
 // Tick expires idle keys and flushes dirty ones in a single Change.
-func (t *Tracker) Tick(ctx context.Context) {
+func (t *Tracker) Tick(ctx context.Context) { t.tick(ctx, false) }
+
+// Flush writes every dirty row now, regardless of the flush interval, and
+// expires nothing. It is called on shutdown.
+func (t *Tracker) Flush(ctx context.Context) { t.tick(ctx, true) }
+
+func (t *Tracker) tick(ctx context.Context, flushAll bool) {
 	type pending struct {
 		k   key
 		e   *entry
@@ -302,7 +308,7 @@ func (t *Tracker) Tick(ctx context.Context) {
 	var ch store.Change
 	var expired, flushed []pending
 	for k, e := range t.entries {
-		if now.Sub(e.LastSeen) >= t.cfg.Idle {
+		if !flushAll && now.Sub(e.LastSeen) >= t.cfg.Idle {
 			if !e.expireEmitted {
 				if e.announced && !t.quiet(e) {
 					ev := t.newEvent(event.NDExpire, e, now)
@@ -315,7 +321,7 @@ func (t *Tracker) Tick(ctx context.Context) {
 			row.Expired = true
 			ch.PutSightings = append(ch.PutSightings, row)
 			expired = append(expired, pending{k, e, e.gen})
-		} else if e.dirty && now.Sub(e.lastWrite) >= t.cfg.Flush {
+		} else if e.dirty && (flushAll || now.Sub(e.lastWrite) >= t.cfg.Flush) {
 			ch.PutSightings = append(ch.PutSightings, e.Sighting)
 			flushed = append(flushed, pending{k, e, e.gen})
 		}

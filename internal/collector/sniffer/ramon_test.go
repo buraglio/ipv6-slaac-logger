@@ -306,3 +306,23 @@ func TestRAMonitorWarmStartCapped(t *testing.T) {
 		t.Fatalf("routers=%d counters=%v", len(m.routers), m.Counters())
 	}
 }
+
+func TestRAMonitorFlush(t *testing.T) {
+	m, rec, clk := newTestRAMon(t)
+	ctx := context.Background()
+	p := raPkt(t, raLL, false, false, 1800)
+	m.Observe(ctx, p, "eth0")
+	clk.t = clk.t.Add(time.Second)
+	m.Observe(ctx, p, "eth0")
+	m.Tick(ctx) // within the flush interval: nothing written
+	before := len(rec.all())
+	m.Flush(ctx)
+	cs := rec.all()
+	if len(cs) != before+1 || !lastRouter(t, rec).LastSeen.Equal(clk.t) || len(cs[before].Events) != 0 {
+		t.Fatalf("flush changes = %+v", cs[before:])
+	}
+	m.Flush(ctx) // clean now
+	if len(rec.all()) != before+1 {
+		t.Fatal("second flush wrote again")
+	}
+}

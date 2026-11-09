@@ -188,7 +188,13 @@ func (m *RAMonitor) Observe(ctx context.Context, p nd.Packet, link string) {
 // Tick flushes dirty routers whose last write is at least Flush old and drops
 // routers idle for Idle or longer from memory. Eviction logs nothing (there is
 // no ra.expire); the row stays in the database until retention removes it.
-func (m *RAMonitor) Tick(ctx context.Context) {
+func (m *RAMonitor) Tick(ctx context.Context) { m.tick(ctx, false) }
+
+// Flush writes every dirty router row now, regardless of the flush interval,
+// and evicts nothing. It is called on shutdown.
+func (m *RAMonitor) Flush(ctx context.Context) { m.tick(ctx, true) }
+
+func (m *RAMonitor) tick(ctx context.Context, flushAll bool) {
 	type pending struct {
 		k   routerKey
 		e   *routerEntry
@@ -199,7 +205,7 @@ func (m *RAMonitor) Tick(ctx context.Context) {
 	var ch store.Change
 	var flushed, evicted []pending
 	for k, e := range m.routers {
-		idle := now.Sub(e.LastSeen) >= m.cfg.Idle
+		idle := !flushAll && now.Sub(e.LastSeen) >= m.cfg.Idle
 		switch {
 		case idle && !e.dirty:
 			delete(m.routers, k)
@@ -207,7 +213,7 @@ func (m *RAMonitor) Tick(ctx context.Context) {
 			// Write its final last_seen first; evict once that succeeded.
 			ch.PutRouters = append(ch.PutRouters, e.Router)
 			evicted = append(evicted, pending{k, e, e.gen})
-		case e.dirty && now.Sub(e.lastWrite) >= m.cfg.Flush:
+		case e.dirty && (flushAll || now.Sub(e.lastWrite) >= m.cfg.Flush):
 			ch.PutRouters = append(ch.PutRouters, e.Router)
 			flushed = append(flushed, pending{k, e, e.gen})
 		}
