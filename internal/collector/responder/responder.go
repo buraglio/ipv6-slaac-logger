@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 // Responder builds Reply messages for Information-Request.

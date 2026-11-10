@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 type params struct {
@@ -34,7 +34,7 @@ func buildInform(p params, xid [3]byte) ([]byte, []byte, error) {
 	}
 	var extra []dhcp6.Option
 	if p.Agent {
-		data := [][]byte{[]byte("ra-logger-agent/regsend"), []byte("os=" + runtime.GOOS), []byte("if=" + p.IfName)}
+		data := [][]byte{[]byte("slaac-logger-agent/regsend"), []byte("os=" + runtime.GOOS), []byte("if=" + p.IfName)}
 		if len(p.MAC) > 0 {
 			data = append(data, []byte("mac="+p.MAC.String()))
 		}

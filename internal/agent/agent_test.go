@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/agent/addrsrc"
-	"github.com/buraglio/ipv6-ra-logger/internal/agent/sched"
-	"github.com/buraglio/ipv6-ra-logger/internal/agent/sender"
+	"github.com/buraglio/ipv6-slaac-logger/internal/agent/addrsrc"
+	"github.com/buraglio/ipv6-slaac-logger/internal/agent/sched"
+	"github.com/buraglio/ipv6-slaac-logger/internal/agent/sender"
 )
 
 var t0 = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)

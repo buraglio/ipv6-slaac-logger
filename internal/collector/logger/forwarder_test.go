@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 type flakySink struct {

@@ -381,7 +381,7 @@ func TestCollectorEndToEnd(t *testing.T) {
 
 	t.Run("query finds the binding", func(t *testing.T) {
 		c.stop(t)
-		out := sh(t, filepath.Join(binDir, "collector"), "query", "-db", filepath.Join(state, "ra-logger.db"), "-addr", "2001:db8:10::100")
+		out := sh(t, filepath.Join(binDir, "collector"), "query", "-db", filepath.Join(state, "slaac-logger.db"), "-addr", "2001:db8:10::100")
 		if !strings.Contains(out, "reg.add") || !strings.Contains(out, "2001:db8:10::100") {
 			t.Fatalf("query output:\n%s", out)
 		}
@@ -509,7 +509,7 @@ func TestSnifferEndToEnd(t *testing.T) {
 
 	// Query the persisted sighting.
 	c.stop(t)
-	out := sh(t, filepath.Join(binDir, "collector"), "query", "-db", filepath.Join(state, "ra-logger.db"),
+	out := sh(t, filepath.Join(binDir, "collector"), "query", "-db", filepath.Join(state, "slaac-logger.db"),
 		"-addr", "2001:db8:10::200", "-json")
 	for _, want := range []string{`"sightings"`, mac, `"mac_src": "nd"`} {
 		if !strings.Contains(out, want) && !strings.Contains(out, strings.ReplaceAll(want, `": "`, `":"`)) {

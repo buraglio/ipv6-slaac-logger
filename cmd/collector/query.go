@@ -15,10 +15,10 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/query"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/query"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 type holderOut struct {
@@ -46,7 +46,7 @@ type queryResult struct {
 
 func queryCmd(args []string, w io.Writer) error {
 	fs := flag.NewFlagSet("query", flag.ContinueOnError)
-	db := fs.String("db", "/var/lib/ra-logger/ra-logger.db", "collector database")
+	db := fs.String("db", "/var/lib/slaac-logger/slaac-logger.db", "collector database")
 	addrS := fs.String("addr", "", "IPv6 address to look up")
 	macS := fs.String("mac", "", "MAC address to look up")
 	duidS := fs.String("duid", "", "DUID (hex) to look up")

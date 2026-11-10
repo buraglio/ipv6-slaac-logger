@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/logger"
-	"github.com/buraglio/ipv6-ra-logger/internal/nd"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/logger"
+	"github.com/buraglio/ipv6-slaac-logger/internal/nd"
 )
 
 const maxFrame = 65536

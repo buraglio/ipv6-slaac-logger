@@ -5,10 +5,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/registrar"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/registrar"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 // Holder is who held an address at a point in time.

@@ -21,7 +21,7 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.StateDir != "/var/lib/ra-logger" || c.ListenAddr != "[::]:547" || c.RetentionDays != 400 ||
+	if c.StateDir != "/var/lib/slaac-logger" || c.ListenAddr != "[::]:547" || c.RetentionDays != 400 ||
 		c.Vendor.EnterpriseNumber != 32473 || c.Log.Facility != "local5" ||
 		len(c.Log.Outputs) != 1 || c.Log.Outputs[0].Type != "unix" || c.Log.Outputs[0].Address != "/dev/log" {
 		t.Fatalf("defaults not applied: %+v", c)

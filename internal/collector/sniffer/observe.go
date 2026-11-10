@@ -4,7 +4,7 @@ import (
 	"net"
 	"net/netip"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/nd"
+	"github.com/buraglio/ipv6-slaac-logger/internal/nd"
 )
 
 // Observation kinds.

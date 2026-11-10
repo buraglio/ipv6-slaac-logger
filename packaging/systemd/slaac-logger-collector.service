@@ -1,15 +1,15 @@
 [Unit]
-Description=ipv6-ra-logger collector (RFC 9686 registration server)
-Documentation=https://github.com/buraglio/ipv6-ra-logger
+Description=ipv6-slaac-logger collector (RFC 9686 registration server)
+Documentation=https://github.com/buraglio/ipv6-slaac-logger
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/ra-logger-collector run -config /etc/ra-logger/collector.toml
-User=ra-logger
-Group=ra-logger
-StateDirectory=ra-logger
+ExecStart=/usr/bin/slaac-logger-collector run -config /etc/slaac-logger/collector.toml
+User=slaac-logger
+Group=slaac-logger
+StateDirectory=slaac-logger
 StateDirectoryMode=0750
 AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW

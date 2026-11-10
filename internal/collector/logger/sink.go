@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 // Sink delivers one event. Implementations are safe for concurrent use.

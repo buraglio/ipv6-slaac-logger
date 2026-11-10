@@ -13,7 +13,7 @@
 
 **Tech Stack:** Go 1.25, `modernc.org/sqlite`, `github.com/BurntSushi/toml`, `golang.org/x/net/ipv6`, `golang.org/x/time/rate`, GitHub Actions.
 
-**Spec:** `docs/superpowers/specs/2026-11-08-ipv6-ra-logger-design.md`
+**Spec:** `docs/superpowers/specs/2026-11-08-ipv6-slaac-logger-design.md`
 
 **Not in this plan (later plans):**
 - Plan 2: the agent, plus Kea interop.
@@ -22,13 +22,13 @@
 
 ## Global Constraints
 
-- Module path: `github.com/buraglio/ipv6-ra-logger`. Confirm it with the user before Task 1. If it changes, replace it everywhere.
+- Module path: `github.com/buraglio/ipv6-slaac-logger`. Confirm it with the user before Task 1. If it changes, replace it everywhere.
 - `go.mod` declares `go 1.25`.
 - Every package must build with `CGO_ENABLED=0`. Use only pure-Go dependencies.
 - The collector targets Linux. Files that use x/net/ipv6 sockets, and everything in `cmd/collector`, carry `//go:build !windows`. All other packages must build and pass tests on Linux, macOS and Windows.
 - The Vendor Class enterprise number defaults to **32473** (the RFC 5612 documentation PEN) and is configurable.
 - Record format: JSON, prefixed with `@cee:` for syslog. Field names exactly as spec §3.2: `ts, event, addr, duid, duid_type, mac, mac_src, origin, host, via, link, preferred_lft, valid_lft, xid`, plus `prev_duid, first_seen, last_seen, reason, src, count, counters`.
-- Defaults: `retention_days = 400`, `facility = "local5"`, `listen_addr = "[::]:547"`, `state_dir = "/var/lib/ra-logger"`.
+- Defaults: `retention_days = 400`, `facility = "local5"`, `listen_addr = "[::]:547"`, `state_dir = "/var/lib/slaac-logger"`.
 - The registrar rejects any ADDR-REG-INFORM carrying a Server ID or Option Request (strict RFC 9686).
 - No panic on any network input.
 - GitHub Actions are pinned by SHA:
@@ -77,8 +77,8 @@ internal/collector/serverid/   serverid.go (+ test)
 internal/collector/query/      query.go (+ test)
 cmd/collector/         main.go run.go query.go (+ tests)   all !windows
 cmd/regsend/           main.go build.go (+ test)
-packaging/systemd/     ra-logger-collector.service ra-logger.sysusers
-packaging/rsyslog/     30-ra-logger.conf
+packaging/systemd/     slaac-logger-collector.service slaac-logger.sysusers
+packaging/rsyslog/     30-slaac-logger.conf
 packaging/collector.example.toml
 test/e2e/e2e_linux_test.go     (build tags: e2e && linux)
 README.md
@@ -108,8 +108,8 @@ README.md
 - [ ] **Step 1: Initialize the module and repository files**
 
 ```bash
-cd /Users/buraglio/Documents/Dev/ipv6-ra-logger
-go mod init github.com/buraglio/ipv6-ra-logger
+cd /Users/buraglio/Documents/Dev/ipv6-slaac-logger
+go mod init github.com/buraglio/ipv6-slaac-logger
 go mod edit -go=1.25
 mkdir -p internal/dhcp6 .github/workflows
 ```
@@ -414,7 +414,7 @@ Expected: FAIL to compile with `undefined: ParseOptions`, `undefined: OptClientI
 
 ```go
 // Package dhcp6 encodes and decodes the subset of DHCPv6 (RFC 8415) and
-// RFC 9686 (address registration) used by ipv6-ra-logger.
+// RFC 9686 (address registration) used by ipv6-slaac-logger.
 package dhcp6
 
 import "net/netip"
@@ -701,7 +701,7 @@ func TestIAAddressMarshalRejectsIPv4(t *testing.T) {
 }
 
 func TestVendorClassRoundTrip(t *testing.T) {
-	vc := VendorClass{Enterprise: 32473, Data: [][]byte{[]byte("ra-logger-agent/0.1"), []byte("os=linux")}}
+	vc := VendorClass{Enterprise: 32473, Data: [][]byte{[]byte("slaac-logger-agent/0.1"), []byte("os=linux")}}
 	b, err := vc.Marshal()
 	if err != nil {
 		t.Fatal(err)
@@ -1267,7 +1267,7 @@ func TestCEEPrefix(t *testing.T) {
 
 func TestHostileStringsStaySingleLine(t *testing.T) {
 	e := New(RegAdd, time.Now())
-	e.Host = "evil\nhost\r<13>1 2026-01-01T00:00:00Z fake ra-logger - - forged"
+	e.Host = "evil\nhost\r<13>1 2026-01-01T00:00:00Z fake slaac-logger - - forged"
 	e.Reason = "x\x00y"
 	got, err := e.CEE()
 	if err != nil {
@@ -1310,7 +1310,7 @@ Expected: FAIL with `undefined: New`.
 `internal/event/event.go`:
 
 ```go
-// Package event defines the record schema shared by every ipv6-ra-logger
+// Package event defines the record schema shared by every ipv6-slaac-logger
 // component (spec §3). One Event is one syslog line and one row in the store.
 package event
 
@@ -1460,7 +1460,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 var (
@@ -1659,7 +1659,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver
 )
@@ -1978,7 +1978,7 @@ git commit -m "feat(store): SQLite events, bindings and forwarder cursors"
 **Interfaces:**
 - Consumes: `event.Event`, `(Event).CEE()`, `(Event).JSON()`, `(Event).Severity()` (Task 3)
 - Produces:
-  - Formatting: `type Facility int`; `ParseFacility(string) (Facility, error)`; `const AppName = "ra-logger"`; `FormatLocal(e, Facility, pid int) ([]byte, error)`; `FormatRFC5424(e, Facility, hostname string, pid int) ([]byte, error)`; `OctetFrame([]byte) []byte`
+  - Formatting: `type Facility int`; `ParseFacility(string) (Facility, error)`; `const AppName = "slaac-logger"`; `FormatLocal(e, Facility, pid int) ([]byte, error)`; `FormatRFC5424(e, Facility, hostname string, pid int) ([]byte, error)`; `OctetFrame([]byte) []byte`
   - `type Sink interface{ Name() string; Send(event.Event) error; Close() error }`
   - Unix socket: `NewUnixSink(path string, f Facility) *UnixSink`
   - TCP/TLS: `NewTCPSink(addr string, f Facility, hostname string) *StreamSink`; `NewTLSSink(addr string, conf *tls.Config, f Facility, hostname string) *StreamSink`
@@ -1996,7 +1996,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 var ts = time.Date(2026, 11, 8, 21, 14, 3, 412_000_000, time.UTC)
@@ -2017,7 +2017,7 @@ func TestFormatRFC5424(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `<172>1 2026-11-08T21:14:03.412Z collector1 ra-logger 42 reg.reject - @cee:{"ts":"2026-11-08T21:14:03.412Z","event":"reg.reject","reason":"scope"}`
+	want := `<172>1 2026-11-08T21:14:03.412Z collector1 slaac-logger 42 reg.reject - @cee:{"ts":"2026-11-08T21:14:03.412Z","event":"reg.reject","reason":"scope"}`
 	if string(got) != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}
@@ -2026,11 +2026,11 @@ func TestFormatRFC5424(t *testing.T) {
 func TestFormatRFC5424SanitizesHostname(t *testing.T) {
 	e := event.New(event.RegAdd, ts)
 	got, _ := FormatRFC5424(e, 21, "bad host\n", 1)
-	if !strings.Contains(string(got), " bad_host_ ra-logger ") {
+	if !strings.Contains(string(got), " bad_host_ slaac-logger ") {
 		t.Fatalf("got %s", got)
 	}
 	got, _ = FormatRFC5424(e, 21, "", 1)
-	if !strings.Contains(string(got), "Z - ra-logger ") {
+	if !strings.Contains(string(got), "Z - slaac-logger ") {
 		t.Fatalf("empty hostname not replaced by nil value: %s", got)
 	}
 }
@@ -2041,7 +2041,7 @@ func TestFormatLocal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "<174>" + e.TS.Local().Format(time.Stamp) + ` ra-logger[42]: @cee:{"ts":"2026-11-08T21:14:03.412Z","event":"reg.add"}`
+	want := "<174>" + e.TS.Local().Format(time.Stamp) + ` slaac-logger[42]: @cee:{"ts":"2026-11-08T21:14:03.412Z","event":"reg.add"}`
 	if string(got) != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}
@@ -2073,7 +2073,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 func TestStreamSinkReconnects(t *testing.T) {
@@ -2148,7 +2148,7 @@ func TestUnixSink(t *testing.T) {
 		t.Fatal(err)
 	}
 	line := string(buf[:n])
-	if !strings.HasPrefix(line, "<174>") || !strings.Contains(line, "ra-logger[") || !strings.Contains(line, `"event":"reg.add"`) {
+	if !strings.HasPrefix(line, "<174>") || !strings.Contains(line, "slaac-logger[") || !strings.Contains(line, `"event":"reg.add"`) {
 		t.Fatalf("line = %q", line)
 	}
 }
@@ -2190,7 +2190,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 // Facility is a syslog facility number.
@@ -2212,14 +2212,14 @@ func ParseFacility(s string) (Facility, error) {
 }
 
 // AppName is the syslog APP-NAME / tag.
-const AppName = "ra-logger"
+const AppName = "slaac-logger"
 
 const rfc5424Time = "2006-01-02T15:04:05.000Z07:00"
 
 func pri(f Facility, e event.Event) int { return int(f)*8 + int(e.Severity()) }
 
 // FormatLocal renders the BSD-style line glibc syslog(3) sends to /dev/log:
-// "<PRI>Mmm dd hh:mm:ss ra-logger[PID]: @cee:{...}".
+// "<PRI>Mmm dd hh:mm:ss slaac-logger[PID]: @cee:{...}".
 func FormatLocal(e event.Event, f Facility, pid int) ([]byte, error) {
 	msg, err := e.CEE()
 	if err != nil {
@@ -2277,7 +2277,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 // Sink delivers one event. Implementations are safe for concurrent use.
@@ -2472,8 +2472,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 type flakySink struct {
@@ -2608,9 +2608,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/logger"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/logger"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 type fakeCommitter struct{ err error }
@@ -2665,7 +2665,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
 )
 
 // Source is the subset of *store.Store a Forwarder needs.
@@ -2795,9 +2795,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/logger"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/logger"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 // Committer is the subset of *store.Store the Recorder needs.
@@ -2886,7 +2886,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 var (
@@ -2957,7 +2957,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 func TestValidate(t *testing.T) {
@@ -3100,7 +3100,7 @@ import (
 	"net"
 	"net/netip"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 // How a registration reached the collector.
@@ -3178,7 +3178,7 @@ func containsAny(pfx []netip.Prefix, a netip.Addr) bool {
 ```go
 package registrar
 
-import "github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+import "github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 
 // Reject reasons (the "reason" field of reg.reject events).
 const (
@@ -3390,7 +3390,7 @@ git commit -m "feat(registrar): RFC 9686 validation, prefix policy and rate limi
   - `type Registrar struct{Bindings; Rec; Policy; Limits; ServerID; PEN; Now; Log; Stats ...}`
   - `New(b BindingStore, rec Recorder, pol *PrefixPolicy, serverID []byte, pen uint32) *Registrar`
   - `(*Registrar) Handle(ctx, *Request) *dhcp6.Message` (nil = drop); `(*Registrar) Sweep(ctx)`
-  - Constants `InfiniteTTL = 12h`, `AgentPrefix = "ra-logger-agent/"`, `OriginNative`, `OriginAgent`, `MACSrcCLLAO`, `MACSrcVendor`, `MACSrcDUID`
+  - Constants `InfiniteTTL = 12h`, `AgentPrefix = "slaac-logger-agent/"`, `OriginNative`, `OriginAgent`, `MACSrcCLLAO`, `MACSrcVendor`, `MACSrcDUID`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3408,9 +3408,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 var ctx = context.Background()
@@ -3597,7 +3597,7 @@ func TestDeregForeignDUIDRejected(t *testing.T) {
 func agentOpts(t *testing.T, pen uint32, mac string) []dhcp6.Option {
 	t.Helper()
 	vc, err := dhcp6.VendorClass{Enterprise: pen, Data: [][]byte{
-		[]byte("ra-logger-agent/0.1"), []byte("os=darwin"), []byte("if=en0"), []byte("mac=" + mac),
+		[]byte("slaac-logger-agent/0.1"), []byte("os=darwin"), []byte("if=en0"), []byte("mac=" + mac),
 	}}.Marshal()
 	if err != nil {
 		t.Fatal(err)
@@ -3742,16 +3742,16 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 const (
 	// InfiniteTTL bounds bindings registered with an infinite valid lifetime.
 	InfiniteTTL = 12 * time.Hour
-	// AgentPrefix starts the first Vendor Class string sent by ra-logger agents.
-	AgentPrefix = "ra-logger-agent/"
+	// AgentPrefix starts the first Vendor Class string sent by slaac-logger agents.
+	AgentPrefix = "slaac-logger-agent/"
 
 	OriginNative = "native"
 	OriginAgent  = "agent"
@@ -3944,7 +3944,7 @@ func (r *Registrar) bindingFor(req *Request, v Valid, now time.Time) store.Bindi
 	return b
 }
 
-// agentInfo returns key=value pairs from an ra-logger agent Vendor Class.
+// agentInfo returns key=value pairs from an slaac-logger agent Vendor Class.
 func (r *Registrar) agentInfo(m *dhcp6.Message) (map[string]string, bool) {
 	opt, ok := m.Options.Get(dhcp6.OptVendorClass)
 	if !ok {
@@ -4102,7 +4102,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 var sid = []byte{0, 4, 1, 2, 3, 4}
@@ -4176,7 +4176,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 // Responder builds Reply messages for Information-Request.
@@ -4262,8 +4262,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/registrar"
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/registrar"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 var ctx = context.Background()
@@ -4458,8 +4458,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/registrar"
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/registrar"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 func TestServeRoundTrip(t *testing.T) {
@@ -4528,8 +4528,8 @@ import (
 	"net/netip"
 	"sync/atomic"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/registrar"
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/registrar"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 // MaxRelayDepth is HOP_COUNT_LIMIT from RFC 8415 §7.6.
@@ -4688,7 +4688,7 @@ import (
 
 	"golang.org/x/net/ipv6"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 // Conn is the collector's UDP 547 socket.
@@ -4844,7 +4844,7 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.StateDir != "/var/lib/ra-logger" || c.ListenAddr != "[::]:547" || c.RetentionDays != 400 ||
+	if c.StateDir != "/var/lib/slaac-logger" || c.ListenAddr != "[::]:547" || c.RetentionDays != 400 ||
 		c.Vendor.EnterpriseNumber != 32473 || c.Log.Facility != "local5" ||
 		len(c.Log.Outputs) != 1 || c.Log.Outputs[0].Type != "unix" || c.Log.Outputs[0].Address != "/dev/log" {
 		t.Fatalf("defaults not applied: %+v", c)
@@ -4993,7 +4993,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/logger"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/logger"
 )
 
 // Interface roles.
@@ -5071,7 +5071,7 @@ func Load(path string) (*Config, error) {
 
 func (c *Config) applyDefaults() {
 	if c.StateDir == "" {
-		c.StateDir = "/var/lib/ra-logger"
+		c.StateDir = "/var/lib/slaac-logger"
 	}
 	if c.ListenAddr == "" {
 		c.ListenAddr = "[::]:547"
@@ -5251,7 +5251,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 const fileName = "server-duid"
@@ -5355,10 +5355,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/config"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/config"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 func readFrame(r *bufio.Reader) (string, error) {
@@ -5435,7 +5435,7 @@ func TestRunRecordsAndForwards(t *testing.T) {
 
 	select {
 	case f := <-frames:
-		if !strings.Contains(f, `"event":"reg.reject"`) || !strings.Contains(f, `"reason":"scope"`) || !strings.Contains(f, " ra-logger ") {
+		if !strings.Contains(f, `"event":"reg.reject"`) || !strings.Contains(f, `"reason":"scope"`) || !strings.Contains(f, " slaac-logger ") {
 			t.Fatalf("forwarded frame = %s", f)
 		}
 	case <-time.After(5 * time.Second):
@@ -5445,7 +5445,7 @@ func TestRunRecordsAndForwards(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	ro, err := store.OpenReadOnly(filepath.Join(dir, "ra-logger.db"))
+	ro, err := store.OpenReadOnly(filepath.Join(dir, "slaac-logger.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5469,7 +5469,7 @@ Expected: FAIL with `undefined: run`.
 ```go
 //go:build !windows
 
-// Command collector is the ipv6-ra-logger RFC 9686 registration server.
+// Command collector is the ipv6-slaac-logger RFC 9686 registration server.
 package main
 
 import (
@@ -5481,7 +5481,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/config"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/config"
 )
 
 var version = "dev" // set with -ldflags "-X main.version=..."
@@ -5489,7 +5489,7 @@ var version = "dev" // set with -ldflags "-X main.version=..."
 const usage = `usage: collector <command> [flags]
 
 commands:
-  run      run the collector (default config /etc/ra-logger/collector.toml)
+  run      run the collector (default config /etc/slaac-logger/collector.toml)
   query    look up an address, MAC or DUID in the collector database
   version  print the version
 `
@@ -5519,7 +5519,7 @@ func main() {
 
 func runCmd(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	cfgPath := fs.String("config", "/etc/ra-logger/collector.toml", "configuration file")
+	cfgPath := fs.String("config", "/etc/slaac-logger/collector.toml", "configuration file")
 	debug := fs.Bool("debug", false, "enable debug logging")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -5559,16 +5559,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/config"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/listener"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/logger"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/netinfo"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/recorder"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/registrar"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/responder"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/serverid"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/config"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/listener"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/logger"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/netinfo"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/recorder"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/registrar"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/responder"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/serverid"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 // run starts every collector component and blocks until ctx is cancelled.
@@ -5580,7 +5580,7 @@ func run(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func(n
 	if err := os.MkdirAll(cfg.StateDir, 0o750); err != nil {
 		return err
 	}
-	st, err := store.Open(filepath.Join(cfg.StateDir, "ra-logger.db"))
+	st, err := store.Open(filepath.Join(cfg.StateDir, "slaac-logger.db"))
 	if err != nil {
 		return err
 	}
@@ -5796,8 +5796,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 var t0 = time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
@@ -5857,8 +5857,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 func TestQueryCmd(t *testing.T) {
@@ -5927,8 +5927,8 @@ package query
 import (
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 // Holder is who held an address at a point in time.
@@ -5988,10 +5988,10 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/query"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/query"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 type holderOut struct {
@@ -6011,7 +6011,7 @@ type queryResult struct {
 
 func queryCmd(args []string, w io.Writer) error {
 	fs := flag.NewFlagSet("query", flag.ContinueOnError)
-	db := fs.String("db", "/var/lib/ra-logger/ra-logger.db", "collector database")
+	db := fs.String("db", "/var/lib/slaac-logger/slaac-logger.db", "collector database")
 	addrS := fs.String("addr", "", "IPv6 address to look up")
 	macS := fs.String("mac", "", "MAC address to look up")
 	duidS := fs.String("duid", "", "DUID (hex) to look up")
@@ -6207,7 +6207,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 func baseParams() params {
@@ -6243,7 +6243,7 @@ func TestBuildInformAgentAndHost(t *testing.T) {
 		t.Fatal("vendor class missing")
 	}
 	vc, _ := dhcp6.ParseVendorClass(vo.Data)
-	if vc.Enterprise != 32473 || !strings.HasPrefix(string(vc.Data[0]), "ra-logger-agent/") || string(vc.Data[len(vc.Data)-1]) != "mac=02:00:00:00:00:01" {
+	if vc.Enterprise != 32473 || !strings.HasPrefix(string(vc.Data[0]), "slaac-logger-agent/") || string(vc.Data[len(vc.Data)-1]) != "mac=02:00:00:00:00:01" {
 		t.Fatalf("vendor class %+v", vc)
 	}
 	if _, ok := m.Options.Get(dhcp6.OptClientFQDN); !ok {
@@ -6316,7 +6316,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 type params struct {
@@ -6342,7 +6342,7 @@ func buildInform(p params, xid [3]byte) ([]byte, []byte, error) {
 	}
 	var extra []dhcp6.Option
 	if p.Agent {
-		data := [][]byte{[]byte("ra-logger-agent/regsend"), []byte("os=" + runtime.GOOS), []byte("if=" + p.IfName)}
+		data := [][]byte{[]byte("slaac-logger-agent/regsend"), []byte("os=" + runtime.GOOS), []byte("if=" + p.IfName)}
 		if len(p.MAC) > 0 {
 			data = append(data, []byte("mac="+p.MAC.String()))
 		}
@@ -6438,7 +6438,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 func main() { os.Exit(realMain(os.Args[1:], os.Stdout, os.Stderr)) }
@@ -6457,7 +6457,7 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	valid := fs.Uint64("valid", 86400, "valid lifetime (seconds)")
 	pref := fs.Uint64("preferred", 14400, "preferred lifetime (seconds)")
 	host := fs.String("host", "", "FQDN to include (option 39)")
-	agent := fs.Bool("agent", false, "include the ra-logger agent Vendor Class")
+	agent := fs.Bool("agent", false, "include the slaac-logger agent Vendor Class")
 	pen := fs.Uint64("pen", 32473, "Vendor Class enterprise number")
 	mutate := fs.String("mutate", "", "malform the message: no-client-id | server-id | oro | two-ia | truncate")
 	wait := fs.Duration("wait", 2*time.Second, "how long to wait for a reply")
@@ -6594,7 +6594,7 @@ git commit -m "feat(regsend): developer tool for valid and malformed registratio
 ### Task 15: Packaging, Linux end-to-end test, CI job, README
 
 **Files:**
-- Create: `packaging/systemd/ra-logger-collector.service`, `packaging/systemd/ra-logger.sysusers`, `packaging/rsyslog/30-ra-logger.conf`, `packaging/collector.example.toml`
+- Create: `packaging/systemd/slaac-logger-collector.service`, `packaging/systemd/slaac-logger.sysusers`, `packaging/rsyslog/30-slaac-logger.conf`, `packaging/collector.example.toml`
 - Create: `internal/collector/config/example_test.go`
 - Create: `test/e2e/e2e_linux_test.go` (`//go:build e2e && linux`)
 - Modify: `.github/workflows/ci.yml` (add the `e2e-linux` job)
@@ -6608,8 +6608,8 @@ git commit -m "feat(regsend): developer tool for valid and malformed registratio
 `packaging/collector.example.toml`:
 
 ```toml
-# ipv6-ra-logger collector configuration
-state_dir      = "/var/lib/ra-logger"
+# ipv6-slaac-logger collector configuration
+state_dir      = "/var/lib/slaac-logger"
 listen_addr    = "[::]:547"
 retention_days = 400
 
@@ -6640,7 +6640,7 @@ address = "/dev/log"
 # [[log.output]]
 # type    = "tls"
 # address = "rsyslog.example.net:6514"
-# ca_file = "/etc/ra-logger/ca.pem"
+# ca_file = "/etc/slaac-logger/ca.pem"
 ```
 
 `internal/collector/config/example_test.go`:
@@ -6669,21 +6669,21 @@ Expected: PASS.
 
 - [ ] **Step 2: Write the systemd and rsyslog files**
 
-`packaging/systemd/ra-logger-collector.service`:
+`packaging/systemd/slaac-logger-collector.service`:
 
 ```ini
 [Unit]
-Description=ipv6-ra-logger collector (RFC 9686 registration server)
-Documentation=https://github.com/buraglio/ipv6-ra-logger
+Description=ipv6-slaac-logger collector (RFC 9686 registration server)
+Documentation=https://github.com/buraglio/ipv6-slaac-logger
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/ra-logger-collector run -config /etc/ra-logger/collector.toml
-User=ra-logger
-Group=ra-logger
-StateDirectory=ra-logger
+ExecStart=/usr/bin/slaac-logger-collector run -config /etc/slaac-logger/collector.toml
+User=slaac-logger
+Group=slaac-logger
+StateDirectory=slaac-logger
 StateDirectoryMode=0750
 AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW
@@ -6708,17 +6708,17 @@ RestartSec=5s
 WantedBy=multi-user.target
 ```
 
-`packaging/systemd/ra-logger.sysusers`:
+`packaging/systemd/slaac-logger.sysusers`:
 
 ```
-u ra-logger - "ipv6-ra-logger" /var/lib/ra-logger
+u slaac-logger - "ipv6-slaac-logger" /var/lib/slaac-logger
 ```
 
-`packaging/rsyslog/30-ra-logger.conf`:
+`packaging/rsyslog/30-slaac-logger.conf`:
 
 ```
-# /etc/rsyslog.d/30-ra-logger.conf
-# Parses ra-logger's @cee: JSON and writes one JSON object per line.
+# /etc/rsyslog.d/30-slaac-logger.conf
+# Parses slaac-logger's @cee: JSON and writes one JSON object per line.
 module(load="mmjsonparse")
 
 template(name="ra_logger_json" type="list") {
@@ -6726,10 +6726,10 @@ template(name="ra_logger_json" type="list") {
   constant(value="\n")
 }
 
-if $programname == "ra-logger" then {
+if $programname == "slaac-logger" then {
   action(type="mmjsonparse" cookie="@cee:")
   if $parsesuccess == "OK" then {
-    action(type="omfile" file="/var/log/ra-logger/events.json" template="ra_logger_json")
+    action(type="omfile" file="/var/log/slaac-logger/events.json" template="ra_logger_json")
   }
   # Forward to a SIEM or central rsyslog over TLS:
   # action(type="omfwd" target="siem.example.net" port="6514" protocol="tcp"
@@ -6738,7 +6738,7 @@ if $programname == "ra-logger" then {
 }
 ```
 
-If `rsyslogd` is installed locally, check the file with `rsyslogd -N1 -f packaging/rsyslog/30-ra-logger.conf`. Expected: no errors, apart from a possible warning that `/var/log/ra-logger` is missing. If rsyslogd isn't installed, skip this check and say so in the commit message.
+If `rsyslogd` is installed locally, check the file with `rsyslogd -N1 -f packaging/rsyslog/30-slaac-logger.conf`. Expected: no errors, apart from a possible warning that `/var/log/slaac-logger` is missing. If rsyslogd isn't installed, skip this check and say so in the commit message.
 
 - [ ] **Step 3: Write the end-to-end test**
 
@@ -6974,7 +6974,7 @@ func TestCollectorEndToEnd(t *testing.T) {
 	t.Run("query finds the binding", func(t *testing.T) {
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 		_ = cmd.Wait()
-		out := sh(t, filepath.Join(binDir, "collector"), "query", "-db", filepath.Join(state, "ra-logger.db"), "-addr", "2001:db8:10::100")
+		out := sh(t, filepath.Join(binDir, "collector"), "query", "-db", filepath.Join(state, "slaac-logger.db"), "-addr", "2001:db8:10::100")
 		if !strings.Contains(out, "reg.add") || !strings.Contains(out, "2001:db8:10::100") {
 			t.Fatalf("query output:\n%s", out)
 		}
@@ -7016,13 +7016,13 @@ Append to `.github/workflows/ci.yml` under `jobs:`:
 Read `README.md`, then replace its contents with:
 
 ````markdown
-# ipv6-ra-logger
+# ipv6-slaac-logger
 
 Forensic mapping of **DUID ↔ MAC ↔ IPv6 address** over time, built on
 [RFC 9686](https://datatracker.ietf.org/doc/rfc9686/) (Registering
 Self-Generated IPv6 Addresses Using DHCPv6), with rsyslog integration.
 
-Design: [docs/superpowers/specs/2026-11-08-ipv6-ra-logger-design.md](docs/superpowers/specs/2026-11-08-ipv6-ra-logger-design.md)
+Design: [docs/superpowers/specs/2026-11-08-ipv6-slaac-logger-design.md](docs/superpowers/specs/2026-11-08-ipv6-slaac-logger-design.md)
 
 ## Status
 
@@ -7036,21 +7036,21 @@ Design: [docs/superpowers/specs/2026-11-08-ipv6-ra-logger-design.md](docs/superp
 ## Build
 
 ```sh
-CGO_ENABLED=0 go build -o bin/ra-logger-collector ./cmd/collector
+CGO_ENABLED=0 go build -o bin/slaac-logger-collector ./cmd/collector
 CGO_ENABLED=0 go build -o bin/regsend ./cmd/regsend   # developer test tool
 ```
 
 ## Run the collector
 
-1. Copy `packaging/collector.example.toml` to `/etc/ra-logger/collector.toml` and edit the interfaces.
-2. Install `packaging/systemd/ra-logger.sysusers` to `/usr/lib/sysusers.d/`, then install `packaging/systemd/ra-logger-collector.service`.
-3. Install `packaging/rsyslog/30-ra-logger.conf` to `/etc/rsyslog.d/`, then restart rsyslog.
+1. Copy `packaging/collector.example.toml` to `/etc/slaac-logger/collector.toml` and edit the interfaces.
+2. Install `packaging/systemd/slaac-logger.sysusers` to `/usr/lib/sysusers.d/`, then install `packaging/systemd/slaac-logger-collector.service`.
+3. Install `packaging/rsyslog/30-slaac-logger.conf` to `/etc/rsyslog.d/`, then restart rsyslog.
 4. If the link has no other DHCPv6 server, give the interface the `responder` role and **set the O flag in the router's RAs**. Native RFC 9686 clients only register after a DHCPv6 server returns option 148.
 
 Look up an address:
 
 ```sh
-ra-logger-collector query -addr 2001:db8:10::5 -at 2026-11-08T21:00:00Z
+slaac-logger-collector query -addr 2001:db8:10::5 -at 2026-11-08T21:00:00Z
 ```
 
 ## Test

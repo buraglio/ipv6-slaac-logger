@@ -10,13 +10,13 @@ import (
 
 	"github.com/kardianos/service"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/agent/config"
+	"github.com/buraglio/ipv6-slaac-logger/internal/agent/config"
 )
 
 //go:embed systemd.tmpl
 var systemdTemplate string
 
-const serviceName = "ra-logger-agent"
+const serviceName = "slaac-logger-agent"
 
 // serviceConfig describes the service: it runs "agent -config <abs path> run".
 func serviceConfig(cfgPath string) *service.Config {

@@ -51,7 +51,7 @@ func TestCEEPrefix(t *testing.T) {
 
 func TestHostileStringsStaySingleLine(t *testing.T) {
 	e := New(RegAdd, time.Now())
-	e.Host = "evil\nhost\r<13>1 2026-01-01T00:00:00Z fake ra-logger - - forged"
+	e.Host = "evil\nhost\r<13>1 2026-01-01T00:00:00Z fake slaac-logger - - forged"
 	e.Reason = "x\x00y"
 	got, err := e.CEE()
 	if err != nil {

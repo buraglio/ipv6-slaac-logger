@@ -15,6 +15,6 @@ func programData() string {
 }
 
 // DefaultConfigPath is where the agent looks for its configuration.
-var DefaultConfigPath = filepath.Join(programData(), "ra-logger-agent", "agent.toml")
+var DefaultConfigPath = filepath.Join(programData(), "slaac-logger-agent", "agent.toml")
 
-func defaultStateDir() string { return filepath.Join(programData(), "ra-logger-agent") }
+func defaultStateDir() string { return filepath.Join(programData(), "slaac-logger-agent") }

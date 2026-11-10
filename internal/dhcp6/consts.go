@@ -1,5 +1,5 @@
 // Package dhcp6 encodes and decodes the subset of DHCPv6 (RFC 8415) and
-// RFC 9686 (address registration) used by ipv6-ra-logger.
+// RFC 9686 (address registration) used by ipv6-slaac-logger.
 package dhcp6
 
 import "net/netip"

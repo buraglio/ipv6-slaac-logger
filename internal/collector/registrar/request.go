@@ -6,7 +6,7 @@ import (
 	"net"
 	"net/netip"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 // How a registration reached the collector.

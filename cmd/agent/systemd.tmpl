@@ -1,6 +1,6 @@
 [Unit]
 Description={{Description}}
-Documentation=https://github.com/buraglio/ipv6-ra-logger
+Documentation=https://github.com/buraglio/ipv6-slaac-logger
 ConditionFileIsExecutable={{Path | cmdEscape}}
 After=network-online.target
 Wants=network-online.target
@@ -9,7 +9,7 @@ Wants=network-online.target
 Type=simple
 ExecStart={{Path | cmdEscape}}{{range Arguments}} {{. | cmd}}{{end}}
 DynamicUser=yes
-StateDirectory=ra-logger-agent
+StateDirectory=slaac-logger-agent
 StateDirectoryMode=0700
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE

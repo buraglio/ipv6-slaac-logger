@@ -44,7 +44,7 @@ func TestIAAddressMarshalRejectsIPv4(t *testing.T) {
 }
 
 func TestVendorClassRoundTrip(t *testing.T) {
-	vc := VendorClass{Enterprise: 32473, Data: [][]byte{[]byte("ra-logger-agent/0.1"), []byte("os=linux")}}
+	vc := VendorClass{Enterprise: 32473, Data: [][]byte{[]byte("slaac-logger-agent/0.1"), []byte("os=linux")}}
 	b, err := vc.Marshal()
 	if err != nil {
 		t.Fatal(err)

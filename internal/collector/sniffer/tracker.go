@@ -9,8 +9,8 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 // Recorder persists and emits one Change atomically (same shape as registrar.Recorder).

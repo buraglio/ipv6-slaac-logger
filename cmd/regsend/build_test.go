@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 func baseParams() params {
@@ -43,7 +43,7 @@ func TestBuildInformAgentAndHost(t *testing.T) {
 		t.Fatal("vendor class missing")
 	}
 	vc, _ := dhcp6.ParseVendorClass(vo.Data)
-	if vc.Enterprise != 32473 || !strings.HasPrefix(string(vc.Data[0]), "ra-logger-agent/") || string(vc.Data[len(vc.Data)-1]) != "mac=02:00:00:00:00:01" {
+	if vc.Enterprise != 32473 || !strings.HasPrefix(string(vc.Data[0]), "slaac-logger-agent/") || string(vc.Data[len(vc.Data)-1]) != "mac=02:00:00:00:00:01" {
 		t.Fatalf("vendor class %+v", vc)
 	}
 	if _, ok := m.Options.Get(dhcp6.OptClientFQDN); !ok {

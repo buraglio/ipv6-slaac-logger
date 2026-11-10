@@ -11,7 +11,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/logger"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/logger"
 )
 
 // Interface roles.
@@ -122,7 +122,7 @@ func Load(path string) (*Config, error) {
 
 func (c *Config) applyDefaults() {
 	if c.StateDir == "" {
-		c.StateDir = "/var/lib/ra-logger"
+		c.StateDir = "/var/lib/slaac-logger"
 	}
 	if c.ListenAddr == "" {
 		c.ListenAddr = "[::]:547"

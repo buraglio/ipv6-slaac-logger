@@ -1,6 +1,6 @@
 //go:build !windows
 
-// Command collector is the ipv6-ra-logger RFC 9686 registration server.
+// Command collector is the ipv6-slaac-logger RFC 9686 registration server.
 package main
 
 import (
@@ -12,7 +12,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/config"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/config"
 )
 
 var version = "dev" // set with -ldflags "-X main.version=..."
@@ -20,7 +20,7 @@ var version = "dev" // set with -ldflags "-X main.version=..."
 const usage = `usage: collector <command> [flags]
 
 commands:
-  run      run the collector (default config /etc/ra-logger/collector.toml)
+  run      run the collector (default config /etc/slaac-logger/collector.toml)
   query    look up an address, MAC or DUID in the collector database
   version  print the version
 `
@@ -50,7 +50,7 @@ func main() {
 
 func runCmd(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	cfgPath := fs.String("config", "/etc/ra-logger/collector.toml", "configuration file")
+	cfgPath := fs.String("config", "/etc/slaac-logger/collector.toml", "configuration file")
 	debug := fs.Bool("debug", false, "enable debug logging")
 	if err := fs.Parse(args); err != nil {
 		return err

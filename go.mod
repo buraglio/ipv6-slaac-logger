@@ -1,4 +1,4 @@
-module github.com/buraglio/ipv6-ra-logger
+module github.com/buraglio/ipv6-slaac-logger
 
 go 1.26.0
 

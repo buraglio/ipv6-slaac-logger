@@ -10,8 +10,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/agent/addrsrc"
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/agent/addrsrc"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 // Key identifies one scheduled address.

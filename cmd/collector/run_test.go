@@ -17,12 +17,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/config"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/registrar"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/sniffer"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/config"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/registrar"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/sniffer"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 func readFrame(r *bufio.Reader) (string, error) {
@@ -107,7 +107,7 @@ func TestRunRecordsAndForwards(t *testing.T) {
 
 	select {
 	case f := <-frames:
-		if !strings.Contains(f, `"event":"reg.reject"`) || !strings.Contains(f, `"reason":"scope"`) || !strings.Contains(f, " ra-logger ") {
+		if !strings.Contains(f, `"event":"reg.reject"`) || !strings.Contains(f, `"reason":"scope"`) || !strings.Contains(f, " slaac-logger ") {
 			t.Fatalf("forwarded frame = %s", f)
 		}
 	case <-time.After(5 * time.Second):
@@ -117,7 +117,7 @@ func TestRunRecordsAndForwards(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	ro, err := store.OpenReadOnly(filepath.Join(dir, "ra-logger.db"))
+	ro, err := store.OpenReadOnly(filepath.Join(dir, "slaac-logger.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/registrar"
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/registrar"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 var ctx = context.Background()

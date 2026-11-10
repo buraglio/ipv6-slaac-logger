@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 // Facility is a syslog facility number.
@@ -30,14 +30,14 @@ func ParseFacility(s string) (Facility, error) {
 }
 
 // AppName is the syslog APP-NAME / tag.
-const AppName = "ra-logger"
+const AppName = "slaac-logger"
 
 const rfc5424Time = "2006-01-02T15:04:05.000Z07:00"
 
 func pri(f Facility, e event.Event) int { return int(f)*8 + int(e.Severity()) }
 
 // FormatLocal renders the BSD-style line glibc syslog(3) sends to /dev/log:
-// "<PRI>Mmm dd hh:mm:ss ra-logger[PID]: @cee:{...}".
+// "<PRI>Mmm dd hh:mm:ss slaac-logger[PID]: @cee:{...}".
 func FormatLocal(e event.Event, f Facility, pid int) ([]byte, error) {
 	msg, err := e.CEE()
 	if err != nil {

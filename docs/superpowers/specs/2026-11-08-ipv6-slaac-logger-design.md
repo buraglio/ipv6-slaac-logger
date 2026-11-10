@@ -1,4 +1,4 @@
-# ipv6-ra-logger — Design Spec
+# ipv6-slaac-logger — Design Spec
 
 - **Date:** 2026-11-08
 - **Status:** Draft, awaiting review
@@ -135,7 +135,7 @@ The agent chooses its DUID in this order:
 The DUID must stay stable across MAC randomization and restarts. If the state file is corrupt, it is backed up before any regeneration, and the regeneration is logged loudly.
 
 The **Vendor Class (16)** data strings are:
-- `ra-logger-agent/<version>`
+- `slaac-logger-agent/<version>`
 - `os=<goos>`
 - `if=<ifname>`
 - `mac=<current interface MAC>`
@@ -285,7 +285,7 @@ The rules are applied strictly, following RFC 9686 §5:
   - info: `*.add`, `*.new`, `ra.seen`
   - notice: `*.conflict`, `ra.change`, `*.expire`
   - warning: reject summaries, `store.error`
-- `packaging/rsyslog/ra-logger.conf` ships a sample config: `mmjsonparse`, a dedicated JSON log file, and an optional forwarding rule.
+- `packaging/rsyslog/slaac-logger.conf` ships a sample config: `mmjsonparse`, a dedicated JSON log file, and an optional forwarding rule.
 
 ### 5.8 Not in v1
 

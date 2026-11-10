@@ -45,7 +45,7 @@ jobs:
           version="${{ github.ref_name }}"
           ext=""
           [ "$GOOS" = "windows" ] && ext=".exe"
-          out="ra-logger-${{ matrix.binary }}-${version}-$GOOS-$GOARCH${ext}"
+          out="slaac-logger-${{ matrix.binary }}-${version}-$GOOS-$GOARCH${ext}"
           go build \
             -ldflags "-X main.version=${version}" \
             -trimpath \
@@ -59,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${{ github.ref_name }}"
-          base="ra-logger-${{ matrix.binary }}-${version}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          base="slaac-logger-${{ matrix.binary }}-${version}-${{ matrix.goos }}-${{ matrix.goarch }}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
             archive="${base}.zip"
             zip "$archive" "${base}.exe"

@@ -1,6 +1,6 @@
 package registrar
 
-import "github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+import "github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 
 // Reject reasons (the "reason" field of reg.reject events).
 const (

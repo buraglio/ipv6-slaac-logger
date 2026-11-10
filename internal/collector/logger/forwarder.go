@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
 )
 
 // Source is the subset of *store.Store a Forwarder needs.

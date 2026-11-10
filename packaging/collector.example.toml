@@ -1,5 +1,5 @@
-# ipv6-ra-logger collector configuration
-state_dir      = "/var/lib/ra-logger"
+# ipv6-slaac-logger collector configuration
+state_dir      = "/var/lib/slaac-logger"
 listen_addr    = "[::]:547"
 retention_days = 400
 
@@ -66,4 +66,4 @@ address = "/dev/log"
 # [[log.output]]
 # type    = "tls"
 # address = "rsyslog.example.net:6514"
-# ca_file = "/etc/ra-logger/ca.pem"
+# ca_file = "/etc/slaac-logger/ca.pem"

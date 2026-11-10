@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/logger"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/logger"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 // Committer is the subset of *store.Store the Recorder needs.

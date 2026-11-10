@@ -4,7 +4,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 func mkMsg(t testing.TB, typ uint8, xid [3]byte, opts ...dhcp6.Option) []byte {

@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/net/ipv6"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 // Conn is the collector's UDP 547 socket.

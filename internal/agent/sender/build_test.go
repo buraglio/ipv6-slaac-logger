@@ -7,8 +7,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/agent/addrsrc"
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/agent/addrsrc"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 func codes(m *dhcp6.Message) []uint16 {
@@ -54,7 +54,7 @@ func TestBuildInformShape(t *testing.T) {
 	for _, d := range vc.Data {
 		got = append(got, string(d))
 	}
-	want := []string{"ra-logger-agent/test", "os=" + runtime.GOOS, "if=en0", "mac=5c:1e:9a:3b:21:aa"}
+	want := []string{"slaac-logger-agent/test", "os=" + runtime.GOOS, "if=en0", "mac=5c:1e:9a:3b:21:aa"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("vendor data %q want %q", got, want)
 	}

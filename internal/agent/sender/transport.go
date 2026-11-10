@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/agent/addrsrc"
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/agent/addrsrc"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 // DestMulticast is the Dest.Name of the All_DHCP_Relay_Agents_and_Servers destination.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 var ts = time.Date(2026, 11, 8, 21, 14, 3, 412_000_000, time.UTC)
@@ -26,7 +26,7 @@ func TestFormatRFC5424(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `<172>1 2026-11-08T21:14:03.412Z collector1 ra-logger 42 reg.reject - @cee:{"ts":"2026-11-08T21:14:03.412Z","event":"reg.reject","reason":"scope"}`
+	want := `<172>1 2026-11-08T21:14:03.412Z collector1 slaac-logger 42 reg.reject - @cee:{"ts":"2026-11-08T21:14:03.412Z","event":"reg.reject","reason":"scope"}`
 	if string(got) != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}
@@ -35,11 +35,11 @@ func TestFormatRFC5424(t *testing.T) {
 func TestFormatRFC5424SanitizesHostname(t *testing.T) {
 	e := event.New(event.RegAdd, ts)
 	got, _ := FormatRFC5424(e, 21, "bad host\n", 1)
-	if !strings.Contains(string(got), " bad_host_ ra-logger ") {
+	if !strings.Contains(string(got), " bad_host_ slaac-logger ") {
 		t.Fatalf("got %s", got)
 	}
 	got, _ = FormatRFC5424(e, 21, "", 1)
-	if !strings.Contains(string(got), "Z - ra-logger ") {
+	if !strings.Contains(string(got), "Z - slaac-logger ") {
 		t.Fatalf("empty hostname not replaced by nil value: %s", got)
 	}
 }
@@ -50,7 +50,7 @@ func TestFormatLocal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "<174>" + e.TS.Local().Format(time.Stamp) + ` ra-logger[42]: @cee:{"ts":"2026-11-08T21:14:03.412Z","event":"reg.add"}`
+	want := "<174>" + e.TS.Local().Format(time.Stamp) + ` slaac-logger[42]: @cee:{"ts":"2026-11-08T21:14:03.412Z","event":"reg.add"}`
 	if string(got) != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}

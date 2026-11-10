@@ -5,7 +5,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/nd"
+	"github.com/buraglio/ipv6-slaac-logger/internal/nd"
 )
 
 func TestObservations(t *testing.T) {

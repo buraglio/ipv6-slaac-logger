@@ -1,4 +1,4 @@
-// Command agent is the ipv6-ra-logger RFC 9686 registration client.
+// Command agent is the ipv6-slaac-logger RFC 9686 registration client.
 package main
 
 import (
@@ -16,12 +16,12 @@ import (
 
 	"github.com/kardianos/service"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/agent"
-	"github.com/buraglio/ipv6-ra-logger/internal/agent/addrsrc"
-	"github.com/buraglio/ipv6-ra-logger/internal/agent/config"
-	"github.com/buraglio/ipv6-ra-logger/internal/agent/duid"
-	"github.com/buraglio/ipv6-ra-logger/internal/agent/sched"
-	"github.com/buraglio/ipv6-ra-logger/internal/agent/sender"
+	"github.com/buraglio/ipv6-slaac-logger/internal/agent"
+	"github.com/buraglio/ipv6-slaac-logger/internal/agent/addrsrc"
+	"github.com/buraglio/ipv6-slaac-logger/internal/agent/config"
+	"github.com/buraglio/ipv6-slaac-logger/internal/agent/duid"
+	"github.com/buraglio/ipv6-slaac-logger/internal/agent/sched"
+	"github.com/buraglio/ipv6-slaac-logger/internal/agent/sender"
 )
 
 var version = "dev" // set with -ldflags "-X main.version=..."

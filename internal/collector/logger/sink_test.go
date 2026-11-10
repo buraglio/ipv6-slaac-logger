@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 func TestStreamSinkReconnects(t *testing.T) {
@@ -89,7 +89,7 @@ func TestUnixSink(t *testing.T) {
 		t.Fatal(err)
 	}
 	line := string(buf[:n])
-	if !strings.HasPrefix(line, "<174>") || !strings.Contains(line, "ra-logger[") || !strings.Contains(line, `"event":"reg.add"`) {
+	if !strings.HasPrefix(line, "<174>") || !strings.Contains(line, "slaac-logger[") || !strings.Contains(line, `"event":"reg.add"`) {
 		t.Fatalf("line = %q", line)
 	}
 }

@@ -8,8 +8,8 @@ import (
 	"net/netip"
 	"sync/atomic"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/registrar"
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/registrar"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 // MaxRelayDepth is HOP_COUNT_LIMIT from RFC 8415 §7.6.

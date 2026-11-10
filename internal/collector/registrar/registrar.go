@@ -14,16 +14,16 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 const (
 	// InfiniteTTL bounds bindings registered with an infinite valid lifetime.
 	InfiniteTTL = 12 * time.Hour
-	// AgentPrefix starts the first Vendor Class string sent by ra-logger agents.
-	AgentPrefix = "ra-logger-agent/"
+	// AgentPrefix starts the first Vendor Class string sent by slaac-logger agents.
+	AgentPrefix = "slaac-logger-agent/"
 
 	OriginNative = "native"
 	OriginAgent  = "agent"
@@ -241,7 +241,7 @@ func (r *Registrar) bindingFor(req *Request, v Valid, now time.Time) store.Bindi
 	return b
 }
 
-// agentInfo returns key=value pairs from an ra-logger agent Vendor Class.
+// agentInfo returns key=value pairs from an slaac-logger agent Vendor Class.
 func (r *Registrar) agentInfo(m *dhcp6.Message) (map[string]string, bool) {
 	opt, ok := m.Options.Get(dhcp6.OptVendorClass)
 	if !ok {

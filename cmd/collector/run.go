@@ -16,17 +16,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/config"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/listener"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/logger"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/netinfo"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/recorder"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/registrar"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/responder"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/serverid"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/sniffer"
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/config"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/listener"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/logger"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/netinfo"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/recorder"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/registrar"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/responder"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/serverid"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/sniffer"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 // run starts every collector component and blocks until ctx is cancelled.
@@ -38,7 +38,7 @@ func run(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func(n
 	if err := os.MkdirAll(cfg.StateDir, 0o750); err != nil {
 		return err
 	}
-	st, err := store.Open(filepath.Join(cfg.StateDir, "ra-logger.db"))
+	st, err := store.Open(filepath.Join(cfg.StateDir, "slaac-logger.db"))
 	if err != nil {
 		return err
 	}

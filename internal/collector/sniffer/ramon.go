@@ -10,9 +10,9 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
-	"github.com/buraglio/ipv6-ra-logger/internal/nd"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/nd"
 )
 
 type routerKey struct {

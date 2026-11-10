@@ -1,9 +1,9 @@
-# ra-logger-agent configuration. Every key is optional; defaults are shown.
+# slaac-logger-agent configuration. Every key is optional; defaults are shown.
 
 # Directory for the agent's persistent state (DUID, IAID). Default is per OS:
-# /var/lib/ra-logger-agent (Linux), /Library/Application Support/ra-logger-agent
-# (macOS), %ProgramData%\ra-logger-agent (Windows).
-# state_dir = "/var/lib/ra-logger-agent"
+# /var/lib/slaac-logger-agent (Linux), /Library/Application Support/slaac-logger-agent
+# (macOS), %ProgramData%\slaac-logger-agent (Windows).
+# state_dir = "/var/lib/slaac-logger-agent"
 
 # Client DUID as hex (4 to 130 bytes). Default: unset. The agent then uses the
 # OS DHCPv6 client's DUID (Windows registry, macOS DUID_IA.plist, Linux dhclient

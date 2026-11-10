@@ -46,7 +46,7 @@ procedure checks that the collector records such a registration with
    shell (SQLite allows concurrent readers):
 
    ```sh
-   collector query -db /var/lib/ra-logger/ra-logger.db -mac <device MAC>
+   collector query -db /var/lib/slaac-logger/slaac-logger.db -mac <device MAC>
    ```
 
    The output must list the device's SLAAC address with a `reg.add` record.

@@ -1,4 +1,4 @@
-// Package event defines the record schema shared by every ipv6-ra-logger
+// Package event defines the record schema shared by every ipv6-slaac-logger
 // component (spec §3). One Event is one syslog line and one row in the store.
 package event
 

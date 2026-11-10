@@ -15,7 +15,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
 )
 
 func main() { os.Exit(realMain(os.Args[1:], os.Stdout, os.Stderr)) }
@@ -34,7 +34,7 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	valid := fs.Uint64("valid", 86400, "valid lifetime (seconds)")
 	pref := fs.Uint64("preferred", 14400, "preferred lifetime (seconds)")
 	host := fs.String("host", "", "FQDN to include (option 39)")
-	agent := fs.Bool("agent", false, "include the ra-logger agent Vendor Class")
+	agent := fs.Bool("agent", false, "include the slaac-logger agent Vendor Class")
 	pen := fs.Uint64("pen", 32473, "Vendor Class enterprise number")
 	mutate := fs.String("mutate", "", "malform the message: no-client-id | server-id | oro | two-ia | truncate")
 	wait := fs.Duration("wait", 2*time.Second, "how long to wait for a reply")

@@ -1,10 +1,10 @@
-# ipv6-ra-logger
+# ipv6-slaac-logger
 
 Forensic mapping of **DUID ↔ MAC ↔ IPv6 address** over time, built on
 [RFC 9686](https://datatracker.ietf.org/doc/rfc9686/) (Registering
 Self-Generated IPv6 Addresses Using DHCPv6), with rsyslog integration.
 
-Design: [docs/superpowers/specs/2026-11-08-ipv6-ra-logger-design.md](docs/superpowers/specs/2026-11-08-ipv6-ra-logger-design.md)
+Design: [docs/superpowers/specs/2026-11-08-ipv6-slaac-logger-design.md](docs/superpowers/specs/2026-11-08-ipv6-slaac-logger-design.md)
 
 ## Status
 
@@ -18,41 +18,41 @@ Design: [docs/superpowers/specs/2026-11-08-ipv6-ra-logger-design.md](docs/superp
 ## Build
 
 ```sh
-CGO_ENABLED=0 go build -o bin/ra-logger-collector ./cmd/collector
-CGO_ENABLED=0 go build -o bin/ra-logger-agent ./cmd/agent
+CGO_ENABLED=0 go build -o bin/slaac-logger-collector ./cmd/collector
+CGO_ENABLED=0 go build -o bin/slaac-logger-agent ./cmd/agent
 CGO_ENABLED=0 go build -o bin/regsend ./cmd/regsend   # developer test tool
 ```
 
 ## Run the collector
 
-1. Copy `packaging/collector.example.toml` to `/etc/ra-logger/collector.toml` and edit the interfaces.
-2. Install `packaging/systemd/ra-logger-sysusers.conf` as `/usr/lib/sysusers.d/ra-logger.conf` and run `systemd-sysusers`, then install `packaging/systemd/ra-logger-collector.service` and run `systemctl daemon-reload`.
+1. Copy `packaging/collector.example.toml` to `/etc/slaac-logger/collector.toml` and edit the interfaces.
+2. Install `packaging/systemd/slaac-logger-sysusers.conf` as `/usr/lib/sysusers.d/slaac-logger.conf` and run `systemd-sysusers`, then install `packaging/systemd/slaac-logger-collector.service` and run `systemctl daemon-reload`.
 3. Create the log directory and install the rsyslog config, then restart rsyslog:
 
    ```sh
-   mkdir -p /var/log/ra-logger
-   chown syslog:adm /var/log/ra-logger   # adjust to match your rsyslog user
-   install -m 644 packaging/rsyslog/30-ra-logger.conf /etc/rsyslog.d/
+   mkdir -p /var/log/slaac-logger
+   chown syslog:adm /var/log/slaac-logger   # adjust to match your rsyslog user
+   install -m 644 packaging/rsyslog/30-slaac-logger.conf /etc/rsyslog.d/
    systemctl restart rsyslog
    ```
 
-   Events are written to `/var/log/ra-logger/events.json` (one JSON object per line). rsyslog silently ignores them if the directory is missing.
+   Events are written to `/var/log/slaac-logger/events.json` (one JSON object per line). rsyslog silently ignores them if the directory is missing.
 4. If the link has no other DHCPv6 server, give the interface the `responder` role and **set the O flag in the router's RAs**. Native RFC 9686 clients only register after a DHCPv6 server returns option 148.
 5. If registrations arrive through DHCPv6 relays, list the relays' source prefixes in `registrar.trusted_relays` (relayed messages from anyone else are dropped) and their client prefixes in `registrar.relay_prefixes`.
 
 **Two separate log channels.** The collector writes to two independent streams:
 
-- **Process log** (startup, errors, capability problems): always goes to stderr, captured by journald when running as a service. Check it with `journalctl -u ra-logger-collector -f`. This is where "sniffer capturing" or "sniffer capture failed" messages appear.
-- **Event log** (`nd.new`, `nd.conflict`, `ra.seen`, `stats`, registrar events): stored in SQLite first, then forwarded to the sinks in `[log]`. With the default config this means `/dev/log` → rsyslog → `/var/log/ra-logger/events.json`.
+- **Process log** (startup, errors, capability problems): always goes to stderr, captured by journald when running as a service. Check it with `journalctl -u slaac-logger-collector -f`. This is where "sniffer capturing" or "sniffer capture failed" messages appear.
+- **Event log** (`nd.new`, `nd.conflict`, `ra.seen`, `stats`, registrar events): stored in SQLite first, then forwarded to the sinks in `[log]`. With the default config this means `/dev/log` → rsyslog → `/var/log/slaac-logger/events.json`.
 
 If you see nothing in syslog, check the process log first. If the sniffer is running, verify events reached the database before suspecting rsyslog:
 
 ```sh
 # Is the sniffer capturing? (process log)
-journalctl -u ra-logger-collector | grep -E "sniffer|capturing|failed"
+journalctl -u slaac-logger-collector | grep -E "sniffer|capturing|failed"
 
 # Did any sightings reach the database? (bypasses syslog entirely)
-ra-logger-collector query -sightings
+slaac-logger-collector query -sightings
 ```
 
 To see events in the terminal without rsyslog, add a `stdout` output:
@@ -63,7 +63,7 @@ type = "stdout"
 ```
 
 **Syslog rate limits.** When `/dev/log` is served by journald or by rsyslog's
-`imuxsock`, their rate limits must be disabled or raised for ra-logger.
+`imuxsock`, their rate limits must be disabled or raised for slaac-logger.
 Otherwise a replayed backlog (or a burst of registrations) can be dropped by
 the daemon after the collector has counted it as delivered. The shipped unit
 sets `LogRateLimitIntervalSec=0` for journald; for `imuxsock` use
@@ -73,11 +73,11 @@ sets `LogRateLimitIntervalSec=0` for journald; for `imuxsock` use
 Look up an address:
 
 ```sh
-ra-logger-collector query -addr 2001:db8:10::5 -at 2026-11-08T21:00:00Z
+slaac-logger-collector query -addr 2001:db8:10::5 -at 2026-11-08T21:00:00Z
 ```
 
 `query` reads the database in the state directory (mode 0750), so run it as
-root or as a member of the `ra-logger` group.
+root or as a member of the `slaac-logger` group.
 
 ## Agent
 
@@ -88,24 +88,24 @@ every configured collector over unicast, and to `ff02::1:2` on links where an
 RFC 9686 server answers.
 
 ```sh
-CGO_ENABLED=0 go build -ldflags "-X main.version=1.0.0" -o ra-logger-agent ./cmd/agent
-ra-logger-agent list                 # show local addresses and which would be registered (-json for JSON)
-ra-logger-agent -config agent.toml run   # foreground
+CGO_ENABLED=0 go build -ldflags "-X main.version=1.0.0" -o slaac-logger-agent ./cmd/agent
+slaac-logger-agent list                 # show local addresses and which would be registered (-json for JSON)
+slaac-logger-agent -config agent.toml run   # foreground
 ```
 
 Configuration is optional TOML; start from `packaging/agent.example.toml`. The
-default path is `/etc/ra-logger/agent.toml` (Linux),
-`/Library/Application Support/ra-logger-agent/agent.toml` (macOS) and
-`%ProgramData%\ra-logger-agent\agent.toml` (Windows). A missing file means
+default path is `/etc/slaac-logger/agent.toml` (Linux),
+`/Library/Application Support/slaac-logger-agent/agent.toml` (macOS) and
+`%ProgramData%\slaac-logger-agent\agent.toml` (Windows). A missing file means
 all defaults.
 
-Install as a service with `ra-logger-agent [-config PATH] install`, then
+Install as a service with `slaac-logger-agent [-config PATH] install`, then
 `start`. Also available: `stop`, `uninstall`. The service runs
 `agent -config <absolute path> run`. Run `install` as root or Administrator.
 
 | OS | Runs as |
 |---|---|
-| Linux | systemd unit, `DynamicUser=yes`, state in `/var/lib/ra-logger-agent`, only `CAP_NET_BIND_SERVICE` |
+| Linux | systemd unit, `DynamicUser=yes`, state in `/var/lib/slaac-logger-agent`, only `CAP_NET_BIND_SERVICE` |
 | macOS | launchd daemon, root |
 | Windows | Windows Service as `NT AUTHORITY\LocalService`; `install` creates the state directory and grants LocalService modify rights with `icacls` |
 

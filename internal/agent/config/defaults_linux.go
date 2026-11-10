@@ -3,6 +3,6 @@
 package config
 
 // DefaultConfigPath is where the agent looks for its configuration.
-const DefaultConfigPath = "/etc/ra-logger/agent.toml"
+const DefaultConfigPath = "/etc/slaac-logger/agent.toml"
 
-func defaultStateDir() string { return "/var/lib/ra-logger-agent" }
+func defaultStateDir() string { return "/var/lib/slaac-logger-agent" }

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buraglio/ipv6-ra-logger/internal/collector/store"
-	"github.com/buraglio/ipv6-ra-logger/internal/dhcp6"
-	"github.com/buraglio/ipv6-ra-logger/internal/event"
+	"github.com/buraglio/ipv6-slaac-logger/internal/collector/store"
+	"github.com/buraglio/ipv6-slaac-logger/internal/dhcp6"
+	"github.com/buraglio/ipv6-slaac-logger/internal/event"
 )
 
 var ctx = context.Background()
@@ -201,7 +201,7 @@ func TestDeregForeignDUIDRejected(t *testing.T) {
 func agentOpts(t *testing.T, pen uint32, mac string) []dhcp6.Option {
 	t.Helper()
 	vc, err := dhcp6.VendorClass{Enterprise: pen, Data: [][]byte{
-		[]byte("ra-logger-agent/0.1"), []byte("os=darwin"), []byte("if=en0"), []byte("mac=" + mac),
+		[]byte("slaac-logger-agent/0.1"), []byte("os=darwin"), []byte("if=en0"), []byte("mac=" + mac),
 	}}.Marshal()
 	if err != nil {
 		t.Fatal(err)
