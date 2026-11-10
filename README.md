@@ -27,9 +27,40 @@ CGO_ENABLED=0 go build -o bin/regsend ./cmd/regsend   # developer test tool
 
 1. Copy `packaging/collector.example.toml` to `/etc/ra-logger/collector.toml` and edit the interfaces.
 2. Install `packaging/systemd/ra-logger-sysusers.conf` as `/usr/lib/sysusers.d/ra-logger.conf` and run `systemd-sysusers`, then install `packaging/systemd/ra-logger-collector.service` and run `systemctl daemon-reload`.
-3. Install `packaging/rsyslog/30-ra-logger.conf` to `/etc/rsyslog.d/`, then restart rsyslog.
+3. Create the log directory and install the rsyslog config, then restart rsyslog:
+
+   ```sh
+   mkdir -p /var/log/ra-logger
+   chown syslog:adm /var/log/ra-logger   # adjust to match your rsyslog user
+   install -m 644 packaging/rsyslog/30-ra-logger.conf /etc/rsyslog.d/
+   systemctl restart rsyslog
+   ```
+
+   Events are written to `/var/log/ra-logger/events.json` (one JSON object per line). rsyslog silently ignores them if the directory is missing.
 4. If the link has no other DHCPv6 server, give the interface the `responder` role and **set the O flag in the router's RAs**. Native RFC 9686 clients only register after a DHCPv6 server returns option 148.
 5. If registrations arrive through DHCPv6 relays, list the relays' source prefixes in `registrar.trusted_relays` (relayed messages from anyone else are dropped) and their client prefixes in `registrar.relay_prefixes`.
+
+**Two separate log channels.** The collector writes to two independent streams:
+
+- **Process log** (startup, errors, capability problems): always goes to stderr, captured by journald when running as a service. Check it with `journalctl -u ra-logger-collector -f`. This is where "sniffer capturing" or "sniffer capture failed" messages appear.
+- **Event log** (`nd.new`, `nd.conflict`, `ra.seen`, `stats`, registrar events): stored in SQLite first, then forwarded to the sinks in `[log]`. With the default config this means `/dev/log` → rsyslog → `/var/log/ra-logger/events.json`.
+
+If you see nothing in syslog, check the process log first. If the sniffer is running, verify events reached the database before suspecting rsyslog:
+
+```sh
+# Is the sniffer capturing? (process log)
+journalctl -u ra-logger-collector | grep -E "sniffer|capturing|failed"
+
+# Did any sightings reach the database? (bypasses syslog entirely)
+ra-logger-collector query -sightings
+```
+
+To see events in the terminal without rsyslog, add a `stdout` output:
+
+```toml
+[[log.output]]
+type = "stdout"
+```
 
 **Syslog rate limits.** When `/dev/log` is served by journald or by rsyslog's
 `imuxsock`, their rate limits must be disabled or raised for ra-logger.
