@@ -74,7 +74,7 @@ func TestRunRecordsAndForwards(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &config.Config{
 		StateDir: dir, ListenAddr: "[::1]:0", RetentionDays: 400,
-		Vendor: config.Vendor{EnterpriseNumber: 32473},
+		Vendor: config.Vendor{EnterpriseNumber: 67611},
 		Log:    config.Log{Facility: "local5", Outputs: []config.Output{{Type: "tcp", Address: ln.Addr().String()}}},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -163,7 +163,7 @@ func TestRunSniffersRetriesMissingInterface(t *testing.T) {
 
 	cfg := &config.Config{
 		StateDir: t.TempDir(), ListenAddr: "[::1]:0", RetentionDays: 400,
-		Vendor:     config.Vendor{EnterpriseNumber: 32473},
+		Vendor:     config.Vendor{EnterpriseNumber: 67611},
 		Interfaces: []config.Interface{{Name: "does-not-exist0", Roles: []string{config.RoleSniff}}},
 		Sniffer:    config.Sniffer{IdleTimeout: "24h", ProxyThreshold: 32, MaxEntries: 100000, MaxRouters: 1000},
 		Log:        config.Log{Facility: "local5", Outputs: []config.Output{{Type: "stdout"}}},

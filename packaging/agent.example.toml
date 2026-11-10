@@ -40,9 +40,9 @@
 # include_interfaces = ["eth*", "en*"]
 # exclude_interfaces = ["docker*", "veth*"]
 
-# Private Enterprise Number sent in the vendor option. Default: 32473, the
-# RFC 5612 documentation PEN. It must match the collector's [vendor] enterprise_number.
-# enterprise_number = 32473
+# Private Enterprise Number sent in the vendor option. Default: 67611 (IANA-assigned
+# PEN for ipv6-slaac-logger). Must match the collector's [vendor] enterprise_number.
+# enterprise_number = 67611
 
 # Log verbosity: debug, info, warn or error. Default: "info".
 # log_level = "info"

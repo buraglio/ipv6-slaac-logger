@@ -110,8 +110,8 @@ Install as a service with `slaac-logger-agent [-config PATH] install`, then
 | Windows | Windows Service as `NT AUTHORITY\LocalService`; `install` creates the state directory and grants LocalService modify rights with `icacls` |
 
 **Enterprise number.** The agent identifies itself in Vendor Class (16) with
-the `enterprise_number` setting (default 32473, the RFC 5612 documentation
-PEN). It must match the collector's `[vendor] enterprise_number`; see
+the `enterprise_number` setting (default 67611, the IANA-assigned PEN for
+this project). It must match the collector's `[vendor] enterprise_number`; see
 [Vendor Class enterprise number](#vendor-class-enterprise-number).
 
 **Multicast needs a server on the link.** In `multicast = "auto"` mode the
@@ -281,8 +281,9 @@ link, or two servers answer the same registration (see spec §10 item 3). The An
 ## Vendor Class enterprise number
 
 The agent identifies itself with a Vendor Class option (16). The default
-enterprise number is **32473**, the RFC 5612 documentation PEN. Replace it with
-a real [IANA PEN](https://pen.iana.org/pen/PenApplication.page) before production use.
+enterprise number is **67611**, the IANA-assigned PEN for this project
+(registered 2026). Both the agent and collector must be configured with the
+same value.
 
 ## License
 

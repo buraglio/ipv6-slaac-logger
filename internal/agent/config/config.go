@@ -20,7 +20,7 @@ const (
 	minHeartbeat     = time.Minute
 	minDUIDLen       = 4
 	maxDUIDLen       = 130 // RFC 8415 section 11.1
-	defaultPEN       = 32473
+	defaultPEN       = 67611
 	multicastAuto    = "auto"
 	multicastAlways  = "always"
 	defaultHeartbeat = time.Hour
@@ -36,7 +36,7 @@ type Config struct {
 	Heartbeat         Duration `toml:"heartbeat"`          // default 1h, min 1m
 	IncludeInterfaces []string `toml:"include_interfaces"` // path.Match globs; empty = all
 	ExcludeInterfaces []string `toml:"exclude_interfaces"`
-	EnterpriseNumber  uint32   `toml:"enterprise_number"` // default 32473
+	EnterpriseNumber  uint32   `toml:"enterprise_number"` // default 67611
 	LogLevel          string   `toml:"log_level"`         // debug|info|warn|error, default info
 
 	addrs []netip.AddrPort

@@ -94,7 +94,7 @@ func TestAgentKeaInterop(t *testing.T) {
 
 	state := t.TempDir()
 	cfgPath := filepath.Join(state, "agent.toml")
-	agentCfg := fmt.Sprintf("state_dir = %q\nmulticast = \"always\"\nenterprise_number = 32473\nheartbeat = \"1m\"\n", state)
+	agentCfg := fmt.Sprintf("state_dir = %q\nmulticast = \"always\"\nenterprise_number = 67611\nheartbeat = \"1m\"\n", state)
 	if err := os.WriteFile(cfgPath, []byte(agentCfg), 0o600); err != nil {
 		t.Fatal(err)
 	}

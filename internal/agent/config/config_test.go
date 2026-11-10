@@ -20,7 +20,7 @@ func write(t *testing.T, body string) string {
 
 func TestDefaults(t *testing.T) {
 	c := Default()
-	if c.Multicast != "auto" || c.Heartbeat.Duration != time.Hour || c.EnterpriseNumber != 32473 || c.LogLevel != "info" || c.StateDir == "" {
+	if c.Multicast != "auto" || c.Heartbeat.Duration != time.Hour || c.EnterpriseNumber != 67611 || c.LogLevel != "info" || c.StateDir == "" {
 		t.Fatalf("bad defaults: %+v", c)
 	}
 }

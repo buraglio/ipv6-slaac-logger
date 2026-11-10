@@ -26,7 +26,7 @@ func testAddr() addrsrc.Addr {
 func TestBuildInformShape(t *testing.T) {
 	mac, _ := net.ParseMAC("5c:1e:9a:3b:21:aa")
 	a := testAddr()
-	b, err := BuildInform([3]byte{1, 2, 3}, []byte{0, 3, 0, 1, 1, 2, 3, 4, 5, 6}, a, mac, Info{Version: "test", Hostname: "host1", PEN: 32473})
+	b, err := BuildInform([3]byte{1, 2, 3}, []byte{0, 3, 0, 1, 1, 2, 3, 4, 5, 6}, a, mac, Info{Version: "test", Hostname: "host1", PEN: 67611})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestBuildInformShape(t *testing.T) {
 	}
 	o, _ = m.Options.Get(dhcp6.OptVendorClass)
 	vc, err := dhcp6.ParseVendorClass(o.Data)
-	if err != nil || vc.Enterprise != 32473 {
+	if err != nil || vc.Enterprise != 67611 {
 		t.Fatalf("vc %+v err %v", vc, err)
 	}
 	var got []string
@@ -61,7 +61,7 @@ func TestBuildInformShape(t *testing.T) {
 }
 
 func TestBuildInformNoMAC(t *testing.T) {
-	b, err := BuildInform([3]byte{}, []byte{1}, testAddr(), nil, Info{Version: "t", Hostname: "h", PEN: 32473})
+	b, err := BuildInform([3]byte{}, []byte{1}, testAddr(), nil, Info{Version: "t", Hostname: "h", PEN: 67611})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestBuildInformNoMAC(t *testing.T) {
 }
 
 func TestBuildInformBadHostnameOmitsFQDN(t *testing.T) {
-	b, err := BuildInform([3]byte{}, []byte{1}, testAddr(), nil, Info{Version: "t", Hostname: "bad host\n", PEN: 32473})
+	b, err := BuildInform([3]byte{}, []byte{1}, testAddr(), nil, Info{Version: "t", Hostname: "bad host\n", PEN: 67611})
 	if err != nil {
 		t.Fatal(err)
 	}

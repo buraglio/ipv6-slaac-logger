@@ -102,7 +102,7 @@ The fields present depend on the event type. Sniffer events carry `mac`, `addr`,
 ### 3.4 Scope decisions
 
 - **All** addresses are registered and logged, **including temporary/privacy addresses**.
-- Vendor Class (option 16) uses enterprise number **32473** (the RFC 5612 documentation PEN) as a **configurable placeholder**. It must be replaced with a real IANA PEN before production use.
+- Vendor Class (option 16) uses enterprise number **67611** (IANA-assigned PEN for this project, registered 2026). The value is configurable to support deployments that require a different PEN.
 
 ## 4. Agent
 
@@ -194,7 +194,7 @@ prefixes = ["2001:db8:10::/64"]   # optional; on-link prefixes are learned autom
 allowed_prefixes = ["2001:db8::/32"]  # required for direct unicast; default deny
 
 [vendor]
-enterprise_number = 32473             # placeholder; replace with real PEN
+enterprise_number = 67611             # IANA-assigned PEN for ipv6-slaac-logger
 ```
 
 ### 5.2 Listener
@@ -351,4 +351,4 @@ testdata/  docs/
 1. **Port 546.** How do Kea and native stacks reply when the ADDR-REG-INFORM source port isn't 546? Can the agent bind 546 next to the OS DHCPv6 client on macOS (`configd`) and Windows (the DHCP service)?
 2. **Linux DUID sources.** *Decided 2026-11-09:* v1 reads dhclient's `default-duid` only. networkd and NetworkManager are deferred. Otherwise the agent generates a DUID-LLT and saves it (§4.2).
 3. **Vendor Class options.** Confirm that Kea accepts ADDR-REG-INFORM messages carrying Vendor Class (16) and FQDN (39). Test added (CI job interop-kea); result pending its first run.
-4. **PEN.** Replace 32473 with a real IANA PEN before production.
+4. **PEN.** Resolved: 67611 is the IANA-assigned PEN for this project.

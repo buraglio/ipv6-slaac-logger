@@ -38,7 +38,7 @@ func newEnv(t *testing.T) *env {
 	}
 	t.Cleanup(func() { st.Close() })
 	e := &env{t: t, st: st, now: t0}
-	e.r = New(st, commitRecorder{st}, testPolicy(), []byte{0, 4, 1, 2, 3, 4}, 32473)
+	e.r = New(st, commitRecorder{st}, testPolicy(), []byte{0, 4, 1, 2, 3, 4}, 67611)
 	e.r.Now = func() time.Time { return e.now }
 	return e
 }
@@ -215,7 +215,7 @@ func agentOpts(t *testing.T, pen uint32, mac string) []dhcp6.Option {
 
 func TestAgentVendorAndFQDN(t *testing.T) {
 	e := newEnv(t)
-	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 7200, agentOpts(t, 32473, "02:00:00:00:00:01")...), testAddr))
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 7200, agentOpts(t, 67611, "02:00:00:00:00:01")...), testAddr))
 	ev := e.events()[0]
 	if ev.Origin != OriginAgent || ev.MAC != "02:00:00:00:00:01" || ev.MACSrc != MACSrcVendor || ev.Host != "lab-mbp.example.com" {
 		t.Fatalf("event = %+v", ev)
@@ -233,7 +233,7 @@ func TestWrongPENIsNative(t *testing.T) {
 
 func TestRelayCLLAOWins(t *testing.T) {
 	e := newEnv(t)
-	req := relayReq(inform(t, testAddr, testDUID, 7200, agentOpts(t, 32473, "02:00:00:00:00:01")...), testAddr)
+	req := relayReq(inform(t, testAddr, testDUID, 7200, agentOpts(t, 67611, "02:00:00:00:00:01")...), testAddr)
 	req.Relay.CLLAO = net.HardwareAddr{0x02, 0xaa, 0xbb, 0xcc, 0xdd, 0xee}
 	if e.r.Handle(ctx, req) == nil {
 		t.Fatal("relayed registration dropped")
@@ -337,7 +337,7 @@ func (c *countRec) Record(context.Context, store.Change) error { c.n++; return n
 
 func TestStoreReadErrorDropsWithoutRecording(t *testing.T) {
 	rec := &countRec{}
-	r := New(errStore{}, rec, testPolicy(), []byte{0, 4, 1, 2, 3, 4}, 32473)
+	r := New(errStore{}, rec, testPolicy(), []byte{0, 4, 1, 2, 3, 4}, 67611)
 	r.Now = func() time.Time { return t0 }
 	if r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 7200), testAddr)) != nil {
 		t.Fatal("got a reply despite store read error")
@@ -372,7 +372,7 @@ func TestInvalidDoesNotDrainGlobalBucket(t *testing.T) {
 
 func TestUnicastCopyDoesNotDowngradeRelayBinding(t *testing.T) {
 	e := newEnv(t)
-	m := inform(t, testAddr, testDUID, 7200, agentOpts(t, 32473, "02:00:00:00:00:01")...)
+	m := inform(t, testAddr, testDUID, 7200, agentOpts(t, 67611, "02:00:00:00:00:01")...)
 	rel := relayReq(m, testAddr)
 	rel.Relay.CLLAO = net.HardwareAddr{0x02, 0xaa, 0xbb, 0xcc, 0xdd, 0xee}
 	e.r.Handle(ctx, rel)
@@ -407,8 +407,8 @@ func TestUnicastCopyKeepsMulticastLink(t *testing.T) {
 
 func TestEqualPrecedenceMACChangeIsChange(t *testing.T) {
 	e := newEnv(t)
-	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 7200, agentOpts(t, 32473, "02:00:00:00:00:01")...), testAddr))
-	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 7200, agentOpts(t, 32473, "02:00:00:00:00:02")...), testAddr))
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 7200, agentOpts(t, 67611, "02:00:00:00:00:01")...), testAddr))
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 7200, agentOpts(t, 67611, "02:00:00:00:00:02")...), testAddr))
 	if got := e.types(); !equal(got, []string{event.RegAdd, event.RegChange}) {
 		t.Fatalf("events = %v", got)
 	}
@@ -470,7 +470,7 @@ func TestMACFromSightingWhenNoOtherSource(t *testing.T) {
 func TestVendorMACBeatsSighting(t *testing.T) {
 	e := newEnv(t)
 	e.r.Sightings = fakeLookup{"aa:bb:cc:dd:ee:ff"}
-	e.r.Handle(ctx, mcastReq(inform(t, testAddr, uuidDUID, 7200, agentOpts(t, 32473, "02:00:00:00:00:01")...), testAddr))
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, uuidDUID, 7200, agentOpts(t, 67611, "02:00:00:00:00:01")...), testAddr))
 	if ev := e.events()[0]; ev.MAC != "02:00:00:00:00:01" || ev.MACSrc != MACSrcVendor {
 		t.Fatalf("event = %+v", ev)
 	}

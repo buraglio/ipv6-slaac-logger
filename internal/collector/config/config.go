@@ -143,7 +143,7 @@ func (c *Config) applyDefaults() {
 		c.Sniffer.MaxRouters = 1000
 	}
 	if c.Vendor.EnterpriseNumber == 0 {
-		c.Vendor.EnterpriseNumber = 32473 // RFC 5612 documentation PEN; replace before production
+		c.Vendor.EnterpriseNumber = 67611 // IANA-assigned PEN for ipv6-slaac-logger
 	}
 	if c.Log.Facility == "" {
 		c.Log.Facility = "local5"

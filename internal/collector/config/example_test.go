@@ -10,7 +10,7 @@ func TestExampleConfigLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("shipped example config is invalid: %v", err)
 	}
-	if c.Vendor.EnterpriseNumber != 32473 || len(c.Interfaces) != 1 {
+	if c.Vendor.EnterpriseNumber != 67611 || len(c.Interfaces) != 1 {
 		t.Fatalf("unexpected example config: %+v", c)
 	}
 }

@@ -22,7 +22,7 @@ func TestLoadAppliesDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.StateDir != "/var/lib/slaac-logger" || c.ListenAddr != "[::]:547" || c.RetentionDays != 400 ||
-		c.Vendor.EnterpriseNumber != 32473 || c.Log.Facility != "local5" ||
+		c.Vendor.EnterpriseNumber != 67611 || c.Log.Facility != "local5" ||
 		len(c.Log.Outputs) != 1 || c.Log.Outputs[0].Type != "unix" || c.Log.Outputs[0].Address != "/dev/log" {
 		t.Fatalf("defaults not applied: %+v", c)
 	}

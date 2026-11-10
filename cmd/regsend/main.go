@@ -35,7 +35,7 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	pref := fs.Uint64("preferred", 14400, "preferred lifetime (seconds)")
 	host := fs.String("host", "", "FQDN to include (option 39)")
 	agent := fs.Bool("agent", false, "include the slaac-logger agent Vendor Class")
-	pen := fs.Uint64("pen", 32473, "Vendor Class enterprise number")
+	pen := fs.Uint64("pen", 67611, "Vendor Class enterprise number")
 	mutate := fs.String("mutate", "", "malform the message: no-client-id | server-id | oro | two-ia | truncate")
 	wait := fs.Duration("wait", 2*time.Second, "how long to wait for a reply")
 	if err := fs.Parse(args); err != nil {
