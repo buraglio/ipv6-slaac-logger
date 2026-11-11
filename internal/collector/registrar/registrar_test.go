@@ -313,6 +313,101 @@ func TestSweepExpires(t *testing.T) {
 	}
 }
 
+func TestSweepSilent(t *testing.T) {
+	e := newEnv(t)
+	e.r.SilentTimeout = 3 * time.Hour
+	// Register with a 24h lifetime so it won't expire during the test.
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 86400), testAddr))
+
+	// Advance 2h: not yet silent.
+	e.now = t0.Add(2 * time.Hour)
+	e.r.Sweep(ctx)
+	evs := e.events()
+	for _, ev := range evs {
+		if ev.Type == event.RegSilent {
+			t.Fatalf("reg.silent fired too early at 2h: %+v", evs)
+		}
+	}
+
+	// Advance past silent_timeout (3h).
+	e.now = t0.Add(4 * time.Hour)
+	e.r.Sweep(ctx)
+	evs = e.events()
+	var silentEvs []event.Event
+	for _, ev := range evs {
+		if ev.Type == event.RegSilent {
+			silentEvs = append(silentEvs, ev)
+		}
+	}
+	if len(silentEvs) != 1 {
+		t.Fatalf("want 1 reg.silent, got %v", evs)
+	}
+	if silentEvs[0].Addr != testAddr.String() {
+		t.Errorf("reg.silent addr = %s, want %s", silentEvs[0].Addr, testAddr)
+	}
+	if silentEvs[0].Reason == "" {
+		t.Error("reg.silent missing reason")
+	}
+
+	// Binding must still exist (reg.silent does not delete).
+	if _, ok := e.binding(testAddr); !ok {
+		t.Fatal("reg.silent must not delete the binding")
+	}
+
+	// Second sweep must NOT re-fire (silenced=1).
+	e.now = t0.Add(5 * time.Hour)
+	e.r.Sweep(ctx)
+	evs = e.events()
+	var count int
+	for _, ev := range evs {
+		if ev.Type == event.RegSilent {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("reg.silent fired %d times, want exactly 1", count)
+	}
+}
+
+func TestSweepSilentResetOnRenewal(t *testing.T) {
+	e := newEnv(t)
+	e.r.SilentTimeout = time.Hour
+
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 86400), testAddr))
+	e.now = t0.Add(2 * time.Hour)
+	e.r.Sweep(ctx) // fires reg.silent; last_seen = t0
+
+	// Renewal at t0+2h clears silenced (last_seen updated to t0+2h).
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 86400), testAddr))
+
+	// Sweep at t0+2h+30min: cutoff = t0+1h+30min < last_seen(t0+2h) → not silent.
+	e.now = t0.Add(2*time.Hour + 30*time.Minute)
+	e.r.Sweep(ctx)
+
+	var count int
+	for _, ev := range e.events() {
+		if ev.Type == event.RegSilent {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("reg.silent fired %d times after renewal, want exactly 1", count)
+	}
+}
+
+func TestSweepSilentDisabled(t *testing.T) {
+	e := newEnv(t)
+	// SilentTimeout == 0: feature disabled.
+	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, 86400), testAddr))
+	e.now = t0.Add(24 * time.Hour)
+	e.r.Sweep(ctx)
+	for _, ev := range e.events() {
+		if ev.Type == event.RegSilent {
+			t.Fatalf("reg.silent fired with SilentTimeout=0: %+v", ev)
+		}
+	}
+}
+
 func TestInfiniteLifetime(t *testing.T) {
 	e := newEnv(t)
 	e.r.Handle(ctx, mcastReq(inform(t, testAddr, testDUID, dhcp6.Infinity), testAddr))
@@ -328,6 +423,9 @@ func (errStore) GetBinding(context.Context, netip.Addr) (store.Binding, bool, er
 	return store.Binding{}, false, errors.New("boom")
 }
 func (errStore) ExpiredBindings(context.Context, time.Time) ([]store.Binding, error) {
+	return nil, nil
+}
+func (errStore) SilentBindings(context.Context, time.Time) ([]store.Binding, error) {
 	return nil, nil
 }
 

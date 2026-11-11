@@ -358,3 +358,104 @@ CREATE TABLE forwarder_state (name TEXT PRIMARY KEY, last_id INTEGER NOT NULL);`
 		t.Errorf("hosts: %v %v", h, err)
 	}
 }
+
+func TestSilentBindings(t *testing.T) {
+	s, _ := openTemp(t)
+	// a: last_seen t0 (old), b: last_seen t0+4h (recent)
+	a, b := sampleBinding(addrA), sampleBinding(addrB)
+	a.LastSeen = t0
+	b.LastSeen = t0.Add(4 * time.Hour)
+	// Both have expires_at well in the future.
+	a.ExpiresAt = t0.Add(24 * time.Hour)
+	b.ExpiresAt = t0.Add(24 * time.Hour)
+	commitOrFatal(t, s, Change{Put: []Binding{a, b}})
+
+	cutoff := t0.Add(3 * time.Hour) // silent_timeout=3h, so cutoff = now-3h = t0+1h
+	got, err := s.SilentBindings(ctx, cutoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Addr != addrA {
+		t.Fatalf("SilentBindings: got %v, want [%v]", got, addrA)
+	}
+
+	// Mark a as silenced; it should no longer appear.
+	commitOrFatal(t, s, Change{Silence: []netip.Addr{addrA}})
+	got, err = s.SilentBindings(ctx, cutoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("after silence, SilentBindings returned %v", got)
+	}
+
+	// SilencedBindings should return a.
+	silenced, err := s.SilencedBindings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(silenced) != 1 || silenced[0].Addr != addrA || !silenced[0].Silenced {
+		t.Fatalf("SilencedBindings: got %v", silenced)
+	}
+}
+
+func TestSilenceResetOnRenewal(t *testing.T) {
+	s, _ := openTemp(t)
+	b := sampleBinding(addrA)
+	b.ExpiresAt = t0.Add(24 * time.Hour)
+	commitOrFatal(t, s, Change{Put: []Binding{b}})
+	commitOrFatal(t, s, Change{Silence: []netip.Addr{addrA}})
+
+	got, _, _ := s.GetBinding(ctx, addrA)
+	if !got.Silenced {
+		t.Fatal("expected silenced=1 after Silence")
+	}
+
+	// Upsert (renewal) must reset silenced to 0.
+	b.LastSeen = t0.Add(time.Hour)
+	commitOrFatal(t, s, Change{Put: []Binding{b}})
+	got, _, _ = s.GetBinding(ctx, addrA)
+	if got.Silenced {
+		t.Fatal("expected silenced=0 after renewal upsert")
+	}
+}
+
+func TestOpenExistingPreSilencedDatabase(t *testing.T) {
+	// Simulate a database that predates the silenced column.
+	path := filepath.Join(t.TempDir(), "presil.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preSilence := `CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, type TEXT NOT NULL,
+  addr TEXT NOT NULL DEFAULT '', duid TEXT NOT NULL DEFAULT '', mac TEXT NOT NULL DEFAULT '', body TEXT NOT NULL);
+CREATE TABLE bindings (addr TEXT PRIMARY KEY, duid TEXT NOT NULL, mac TEXT NOT NULL DEFAULT '', mac_src TEXT NOT NULL DEFAULT '',
+  origin TEXT NOT NULL DEFAULT '', host TEXT NOT NULL DEFAULT '', via TEXT NOT NULL DEFAULT '', link TEXT NOT NULL DEFAULT '',
+  preferred INTEGER NOT NULL, valid INTEGER NOT NULL, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE forwarder_state (name TEXT PRIMARY KEY, last_id INTEGER NOT NULL);`
+	if _, err := db.Exec(preSilence); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open pre-silenced DB: %v", err)
+	}
+	defer s.Close()
+	// Should be able to read and write bindings including the silenced column.
+	b := sampleBinding(addrA)
+	b.ExpiresAt = t0.Add(time.Hour)
+	commitOrFatal(t, s, Change{Put: []Binding{b}})
+	got, ok, err := s.GetBinding(ctx, addrA)
+	if err != nil || !ok {
+		t.Fatalf("GetBinding: %v %v", ok, err)
+	}
+	if got.Silenced {
+		t.Error("expected silenced=false on migrated binding")
+	}
+	commitOrFatal(t, s, Change{Silence: []netip.Addr{addrA}})
+	got, _, _ = s.GetBinding(ctx, addrA)
+	if !got.Silenced {
+		t.Error("expected silenced=true after Silence on migrated DB")
+	}
+}

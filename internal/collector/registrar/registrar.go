@@ -43,6 +43,7 @@ type MACLookup interface {
 type BindingStore interface {
 	GetBinding(ctx context.Context, addr netip.Addr) (store.Binding, bool, error)
 	ExpiredBindings(ctx context.Context, now time.Time) ([]store.Binding, error)
+	SilentBindings(ctx context.Context, cutoff time.Time) ([]store.Binding, error)
 }
 
 // Recorder writes changes (satisfied by *recorder.Recorder).
@@ -76,6 +77,9 @@ type Registrar struct {
 	Now      func() time.Time
 	Log      *slog.Logger
 	Stats    Stats
+	// SilentTimeout, if non-zero, is how long a binding can go without renewal
+	// before a reg.silent event is fired. 0 disables the feature.
+	SilentTimeout time.Duration
 
 	// Sightings, if set, supplies a sniffed MAC for registrations that carry
 	// no CLLAO or agent-reported MAC. It outranks the MAC embedded in the DUID.
@@ -371,8 +375,8 @@ func (r *Registrar) reject(ctx context.Context, req *Request, reason string, now
 	}
 }
 
-// Sweep expires bindings past their lifetime and emits reject summaries.
-// The collector calls it every minute.
+// Sweep expires bindings past their lifetime, fires reg.silent for bindings
+// that have gone quiet, and emits reject summaries. The collector calls it every minute.
 func (r *Registrar) Sweep(ctx context.Context) {
 	now := r.Now()
 	r.mu.Lock()
@@ -391,6 +395,28 @@ func (r *Registrar) Sweep(ctx context.Context) {
 		e.Preferred = event.U32(b.Preferred)
 		if err := r.Rec.Record(ctx, store.Change{Events: []event.Event{e}, Delete: []netip.Addr{b.Addr}}); err != nil {
 			r.Log.Error("registrar: record expire", "addr", b.Addr, "err", err)
+		}
+	}
+	if r.SilentTimeout > 0 {
+		cutoff := now.Add(-r.SilentTimeout)
+		silent, err := r.Bindings.SilentBindings(ctx, cutoff)
+		if err != nil {
+			r.Log.Error("registrar: list silent", "err", err)
+		}
+		for _, b := range silent {
+			e := eventFor(event.RegSilent, b, now)
+			if d, err := dhcp6.ParseHex(b.DUID); err == nil {
+				e.DUIDType = dhcp6.DUIDTypeName(d)
+			}
+			e.FirstSeen = event.TimePtr(b.FirstSeen)
+			e.LastSeen = event.TimePtr(b.LastSeen)
+			e.Reason = "no renewal for " + r.SilentTimeout.String()
+			if err := r.Rec.Record(ctx, store.Change{
+				Events:  []event.Event{e},
+				Silence: []netip.Addr{b.Addr},
+			}); err != nil {
+				r.Log.Error("registrar: record silent", "addr", b.Addr, "err", err)
+			}
 		}
 	}
 	r.mu.Unlock()

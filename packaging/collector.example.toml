@@ -24,6 +24,11 @@ roles = ["listen"]
 allowed_prefixes = []   # required for direct unicast registrations; empty = deny
 relay_prefixes   = []   # prefixes reachable through DHCPv6 relays
 trusted_relays   = []   # source prefixes of DHCPv6 relay agents allowed to forward registrations; empty = accept no relayed registrations
+# silent_timeout = "3h" # How long without a renewal before a reg.silent event is fired for a binding.
+                        # This is an inference, not a protocol de-registration: the agent stopped
+                        # checking in for silent_timeout, but the address may still be in use.
+                        # Set to match your agent heartbeat interval × 2-3 (agent default heartbeat: 1h).
+                        # Set to "0" to disable. Default: "3h".
 
 # Sniffer tuning (only used by interfaces with the "sniff" role). Every key
 # is optional; the values shown are the defaults.

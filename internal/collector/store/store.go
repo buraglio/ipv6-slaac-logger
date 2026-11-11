@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/netip"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/buraglio/ipv6-slaac-logger/internal/event"
@@ -45,7 +46,8 @@ CREATE TABLE IF NOT EXISTS bindings (
   valid      INTEGER NOT NULL,
   first_seen INTEGER NOT NULL,
   last_seen  INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL
+  expires_at INTEGER NOT NULL,
+  silenced   INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS bindings_expires ON bindings(expires_at);
 CREATE INDEX IF NOT EXISTS bindings_duid    ON bindings(duid);
@@ -79,15 +81,20 @@ CREATE VIEW IF NOT EXISTS hosts AS
   FROM sightings s
   WHERE s.proxy_suspect = 0 AND s.expired = 0 AND NOT EXISTS (SELECT 1 FROM bindings b WHERE b.addr = s.addr);`
 
-const bindingCols = `addr, duid, mac, mac_src, origin, host, via, link, preferred, valid, first_seen, last_seen, expires_at`
+// bindingInsertCols are the columns written on upsert (silenced is intentionally
+// excluded: DEFAULT 0 on insert, reset to 0 by the ON CONFLICT clause).
+const bindingInsertCols = `addr, duid, mac, mac_src, origin, host, via, link, preferred, valid, first_seen, last_seen, expires_at`
 
-const upsertBinding = `INSERT INTO bindings(` + bindingCols + `)
+// bindingSelectCols are the columns read by scanBinding (includes silenced).
+const bindingSelectCols = bindingInsertCols + `, silenced`
+
+const upsertBinding = `INSERT INTO bindings(` + bindingInsertCols + `)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(addr) DO UPDATE SET
   duid=excluded.duid, mac=excluded.mac, mac_src=excluded.mac_src, origin=excluded.origin,
   host=excluded.host, via=excluded.via, link=excluded.link, preferred=excluded.preferred,
   valid=excluded.valid, first_seen=excluded.first_seen, last_seen=excluded.last_seen,
-  expires_at=excluded.expires_at`
+  expires_at=excluded.expires_at, silenced=0`
 
 // lookupFields whitelists columns usable in *Where queries.
 var lookupFields = map[string]string{"addr": "addr", "duid": "duid", "mac": "mac"}
@@ -132,6 +139,7 @@ type Binding struct {
 	FirstSeen time.Time  `json:"first_seen"`
 	LastSeen  time.Time  `json:"last_seen"`
 	ExpiresAt time.Time  `json:"expires_at"`
+	Silenced  bool       `json:"silenced,omitempty"`
 }
 
 // Sighting is one observed (MAC, address, link, VLAN) association from ND traffic.
@@ -185,6 +193,8 @@ type Change struct {
 	Events []event.Event
 	Put    []Binding
 	Delete []netip.Addr
+	// Silence marks the named bindings as silenced (reg.silent fired, suppress re-fire).
+	Silence []netip.Addr
 
 	PutSightings []Sighting
 	PutRouters   []Router
@@ -213,6 +223,15 @@ func open(dsn string, initSchema bool) (*Store, error) {
 		if _, err := db.Exec(schema); err != nil {
 			db.Close()
 			return nil, fmt.Errorf("store: init schema: %w", err)
+		}
+		// Migration: add silenced column to existing databases that predate it.
+		// ALTER TABLE ADD COLUMN is a no-op if the column already exists in SQLite
+		// terms only when it returns "duplicate column name"; any other error is real.
+		if _, err := db.Exec(`ALTER TABLE bindings ADD COLUMN silenced INTEGER NOT NULL DEFAULT 0`); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column name") {
+				db.Close()
+				return nil, fmt.Errorf("store: migrate bindings.silenced: %w", err)
+			}
 		}
 	} else if err := db.Ping(); err != nil {
 		db.Close()
@@ -255,6 +274,11 @@ func (s *Store) Commit(ctx context.Context, c Change) error {
 			return fmt.Errorf("store: delete binding: %w", err)
 		}
 	}
+	for _, a := range c.Silence {
+		if _, err := tx.ExecContext(ctx, `UPDATE bindings SET silenced = 1 WHERE addr = ?`, a.String()); err != nil {
+			return fmt.Errorf("store: silence binding: %w", err)
+		}
+	}
 	for _, sg := range c.PutSightings {
 		if _, err := tx.ExecContext(ctx, upsertSighting,
 			sg.MAC, sg.Addr.String(), sg.Link, int64(sg.VLAN), sg.Kind,
@@ -284,9 +308,9 @@ type scanner interface{ Scan(dest ...any) error }
 func scanBinding(sc scanner) (Binding, error) {
 	var b Binding
 	var addr string
-	var pref, valid, first, last, exp int64
+	var pref, valid, first, last, exp, silenced int64
 	if err := sc.Scan(&addr, &b.DUID, &b.MAC, &b.MACSrc, &b.Origin, &b.Host, &b.Via, &b.Link,
-		&pref, &valid, &first, &last, &exp); err != nil {
+		&pref, &valid, &first, &last, &exp, &silenced); err != nil {
 		return Binding{}, err
 	}
 	a, err := netip.ParseAddr(addr)
@@ -298,12 +322,13 @@ func scanBinding(sc scanner) (Binding, error) {
 	b.FirstSeen = time.UnixMilli(first).UTC()
 	b.LastSeen = time.UnixMilli(last).UTC()
 	b.ExpiresAt = time.UnixMilli(exp).UTC()
+	b.Silenced = silenced != 0
 	return b, nil
 }
 
 // GetBinding returns the binding for addr, if any.
 func (s *Store) GetBinding(ctx context.Context, addr netip.Addr) (Binding, bool, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+bindingCols+` FROM bindings WHERE addr = ?`, addr.String())
+	row := s.db.QueryRowContext(ctx, `SELECT `+bindingSelectCols+` FROM bindings WHERE addr = ?`, addr.String())
 	b, err := scanBinding(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Binding{}, false, nil
@@ -333,7 +358,22 @@ func (s *Store) queryBindings(ctx context.Context, q string, args ...any) ([]Bin
 
 // ExpiredBindings returns bindings whose expires_at is at or before now.
 func (s *Store) ExpiredBindings(ctx context.Context, now time.Time) ([]Binding, error) {
-	return s.queryBindings(ctx, `SELECT `+bindingCols+` FROM bindings WHERE expires_at <= ? ORDER BY expires_at`, now.UnixMilli())
+	return s.queryBindings(ctx, `SELECT `+bindingSelectCols+` FROM bindings WHERE expires_at <= ? ORDER BY expires_at`, now.UnixMilli())
+}
+
+// SilentBindings returns active bindings that have not been renewed since before
+// cutoff and have not already had a reg.silent event fired (silenced = 0).
+func (s *Store) SilentBindings(ctx context.Context, cutoff time.Time) ([]Binding, error) {
+	return s.queryBindings(ctx,
+		`SELECT `+bindingSelectCols+` FROM bindings WHERE last_seen < ? AND silenced = 0 AND expires_at > ? ORDER BY last_seen`,
+		cutoff.UnixMilli(), cutoff.UnixMilli())
+}
+
+// SilencedBindings returns all bindings currently marked silenced (reg.silent fired,
+// no renewal received since).
+func (s *Store) SilencedBindings(ctx context.Context) ([]Binding, error) {
+	return s.queryBindings(ctx,
+		`SELECT `+bindingSelectCols+` FROM bindings WHERE silenced = 1 ORDER BY last_seen`)
 }
 
 // BindingsWhere returns bindings where field ("addr", "duid", "mac") equals value.
@@ -342,7 +382,7 @@ func (s *Store) BindingsWhere(ctx context.Context, field, value string) ([]Bindi
 	if !ok {
 		return nil, fmt.Errorf("store: invalid lookup field %q", field)
 	}
-	return s.queryBindings(ctx, `SELECT `+bindingCols+` FROM bindings WHERE `+col+` = ? ORDER BY first_seen`, value)
+	return s.queryBindings(ctx, `SELECT `+bindingSelectCols+` FROM bindings WHERE `+col+` = ? ORDER BY first_seen`, value)
 }
 
 func (s *Store) queryEvents(ctx context.Context, q string, args ...any) ([]StoredEvent, error) {

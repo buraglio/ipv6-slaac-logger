@@ -50,6 +50,13 @@ type Registrar struct {
 	AllowedPrefixes []string `toml:"allowed_prefixes"`
 	RelayPrefixes   []string `toml:"relay_prefixes"`
 	TrustedRelays   []string `toml:"trusted_relays"` // IPv6 prefixes of relay agents whose Relay-Forward messages are accepted; empty = none
+	SilentTimeout   string   `toml:"silent_timeout"` // default "3h"; 0 disables reg.silent events
+}
+
+// Silent returns SilentTimeout as a duration (0 if unset or unparseable, which disables the feature).
+func (r Registrar) Silent() time.Duration {
+	d, _ := time.ParseDuration(r.SilentTimeout)
+	return d
 }
 
 // Sniffer tunes the passive ND/RA sniffer (interfaces with the sniff role).
@@ -144,6 +151,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Vendor.EnterpriseNumber == 0 {
 		c.Vendor.EnterpriseNumber = 67611 // IANA-assigned PEN for ipv6-slaac-logger
+	}
+	if c.Registrar.SilentTimeout == "" {
+		c.Registrar.SilentTimeout = "3h"
 	}
 	if c.Log.Facility == "" {
 		c.Log.Facility = "local5"

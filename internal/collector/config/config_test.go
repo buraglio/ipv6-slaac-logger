@@ -26,6 +26,9 @@ func TestLoadAppliesDefaults(t *testing.T) {
 		len(c.Log.Outputs) != 1 || c.Log.Outputs[0].Type != "unix" || c.Log.Outputs[0].Address != "/dev/log" {
 		t.Fatalf("defaults not applied: %+v", c)
 	}
+	if c.Registrar.SilentTimeout != "3h" || c.Registrar.Silent() != 3*time.Hour {
+		t.Fatalf("SilentTimeout default wrong: %q %v", c.Registrar.SilentTimeout, c.Registrar.Silent())
+	}
 	if !c.Interfaces[0].Has(RoleResponder) || c.Interfaces[0].Has(RoleSniff) {
 		t.Fatal("Has() wrong")
 	}
