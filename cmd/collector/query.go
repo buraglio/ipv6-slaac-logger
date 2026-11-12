@@ -54,12 +54,16 @@ func queryCmd(args []string, w io.Writer) error {
 	fromS := fs.String("from", "", "RFC 3339 start of the event window")
 	toS := fs.String("to", "", "RFC 3339 end of the event window")
 	silentOnly := fs.Bool("silent", false, "list only bindings that have been marked presumed-silent (reg.silent fired, no renewal since)")
+	sightingsOnly := fs.Bool("sightings", false, "list all live sniffer sightings")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *silentOnly {
 		return querySilent(*db, *asJSON, w)
+	}
+	if *sightingsOnly {
+		return querySightingsList(*db, *asJSON, w)
 	}
 	field, value, err := lookupKey(*addrS, *macS, *duidS)
 	if err != nil {
@@ -141,6 +145,44 @@ func queryCmd(args []string, w io.Writer) error {
 		return enc.Encode(res)
 	}
 	return writeText(w, res)
+}
+
+// querySightingsList lists all live sniffer sightings. It is the -sightings flag's handler.
+func querySightingsList(dbPath string, asJSON bool, w io.Writer) error {
+	st, err := store.OpenReadOnly(dbPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	sgs, err := st.Sightings(context.Background(), false)
+	if err != nil {
+		if noSuchTable(err) {
+			sgs = nil
+		} else {
+			return err
+		}
+	}
+	if asJSON {
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(sgs)
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "LIVE SIGHTINGS")
+	if len(sgs) == 0 {
+		fmt.Fprintln(tw, "  (none)")
+	} else {
+		fmt.Fprintln(tw, "MAC\tADDR\tLINK\tVLAN\tKIND\tFIRST SEEN\tLAST SEEN\tFLAGS")
+		for _, sg := range sgs {
+			var flags []string
+			if sg.ProxySuspect {
+				flags = append(flags, "proxy_suspect")
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
+				sg.MAC, sg.Addr, sg.Link, sg.VLAN, sg.Kind, ts(sg.FirstSeen), ts(sg.LastSeen), dash(strings.Join(flags, ",")))
+		}
+	}
+	return tw.Flush()
 }
 
 // querySilent lists all bindings currently marked silenced (reg.silent fired,
