@@ -26,7 +26,19 @@ CGO_ENABLED=0 go build -o bin/regsend ./cmd/regsend   # developer test tool
 ## Run the collector
 
 1. Copy `packaging/collector.example.toml` to `/etc/slaac-logger/collector.toml` and edit the interfaces.
-2. Install `packaging/systemd/slaac-logger-sysusers.conf` as `/usr/lib/sysusers.d/slaac-logger.conf` and run `systemd-sysusers`, then install `packaging/systemd/slaac-logger-collector.service` and run `systemctl daemon-reload`.
+2. Create the system user **before** installing the service — the service will fail to start if the user does not exist:
+
+   ```sh
+   install -m 644 packaging/systemd/slaac-logger-sysusers.conf /usr/lib/sysusers.d/slaac-logger.conf
+   systemd-sysusers /usr/lib/sysusers.d/slaac-logger.conf
+   ```
+
+   Then install and reload the service unit:
+
+   ```sh
+   install -m 644 packaging/systemd/slaac-logger-collector.service /etc/systemd/system/
+   systemctl daemon-reload
+   ```
 3. Create the log directory and install the rsyslog config, then restart rsyslog:
 
    ```sh

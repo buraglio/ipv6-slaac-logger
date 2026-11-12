@@ -1,7 +1,7 @@
 [Unit]
 Description=ipv6-slaac-logger collector (RFC 9686 registration server)
 Documentation=https://github.com/buraglio/ipv6-slaac-logger
-After=network-online.target
+After=systemd-sysusers.service network-online.target
 Wants=network-online.target
 
 [Service]
