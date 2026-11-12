@@ -111,6 +111,7 @@ func run(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func(n
 	}
 	reg := registrar.New(st, rec, &registrar.PrefixPolicy{OnLink: onLink.For, Relay: relay, Unicast: allowed}, sid, cfg.Vendor.EnterpriseNumber)
 	reg.Log = log
+	reg.SilentTimeout = cfg.Registrar.Silent()
 
 	tcfg := sniffer.DefaultTrackerConfig()
 	tcfg.Idle, tcfg.LogLinkLocal = cfg.Sniffer.Idle(), cfg.Sniffer.LogLinkLocal

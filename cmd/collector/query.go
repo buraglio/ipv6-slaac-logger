@@ -53,9 +53,13 @@ func queryCmd(args []string, w io.Writer) error {
 	atS := fs.String("at", "", "RFC 3339 time: events up to then, and who held -addr then")
 	fromS := fs.String("from", "", "RFC 3339 start of the event window")
 	toS := fs.String("to", "", "RFC 3339 end of the event window")
+	silentOnly := fs.Bool("silent", false, "list only bindings that have been marked presumed-silent (reg.silent fired, no renewal since)")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *silentOnly {
+		return querySilent(*db, *asJSON, w)
 	}
 	field, value, err := lookupKey(*addrS, *macS, *duidS)
 	if err != nil {
@@ -139,6 +143,38 @@ func queryCmd(args []string, w io.Writer) error {
 	return writeText(w, res)
 }
 
+// querySilent lists all bindings currently marked silenced (reg.silent fired,
+// no renewal received since). It is the -silent flag's handler.
+func querySilent(dbPath string, asJSON bool, w io.Writer) error {
+	st, err := store.OpenReadOnly(dbPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	bs, err := st.SilencedBindings(context.Background())
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(bs)
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "PRESUMED-SILENT BINDINGS (reg.silent fired, no renewal since)")
+	if len(bs) == 0 {
+		fmt.Fprintln(tw, "  (none)")
+	} else {
+		fmt.Fprintln(tw, "ADDR\tDUID\tMAC\tHOST\tLINK\tFIRST SEEN\tLAST SEEN\tEXPIRES")
+		for _, b := range bs {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				b.Addr, b.DUID, dash(b.MAC), dash(b.Host), b.Link,
+				ts(b.FirstSeen), ts(b.LastSeen), ts(b.ExpiresAt))
+		}
+	}
+	return tw.Flush()
+}
+
 // noSuchTable reports a database that predates the sniffer: the read-only
 // open does not create its tables, so those lookups are empty, not errors.
 func noSuchTable(err error) bool {
@@ -204,10 +240,15 @@ func writeText(w io.Writer, res queryResult) error {
 	if len(res.Bindings) == 0 {
 		fmt.Fprintln(tw, "  (none)")
 	} else {
-		fmt.Fprintln(tw, "ADDR\tDUID\tMAC\tHOST\tVIA\tLINK\tFIRST SEEN\tLAST SEEN\tEXPIRES")
+		fmt.Fprintln(tw, "ADDR\tDUID\tMAC\tHOST\tVIA\tLINK\tFIRST SEEN\tLAST SEEN\tEXPIRES\tFLAGS")
 		for _, b := range res.Bindings {
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				b.Addr, b.DUID, dash(b.MAC), dash(b.Host), b.Via, b.Link, ts(b.FirstSeen), ts(b.LastSeen), ts(b.ExpiresAt))
+			flags := ""
+			if b.Silenced {
+				flags = "silent"
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				b.Addr, b.DUID, dash(b.MAC), dash(b.Host), b.Via, b.Link,
+				ts(b.FirstSeen), ts(b.LastSeen), ts(b.ExpiresAt), dash(flags))
 		}
 	}
 	fmt.Fprintln(tw)
