@@ -9,10 +9,13 @@ import (
 
 // Observation kinds.
 const (
-	KindDAD = "dad"
-	KindNS  = "ns"
-	KindNA  = "na"
-	KindRS  = "rs"
+	KindDAD        = "dad"
+	KindNS         = "ns"
+	KindNA         = "na"
+	KindRS         = "rs"
+	KindARPRequest = "arp-request"
+	KindARPReply   = "arp-reply"
+	KindGARP       = "garp"
 )
 
 // Observation is one MAC to address binding seen on the wire.
