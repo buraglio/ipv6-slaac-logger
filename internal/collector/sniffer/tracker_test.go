@@ -570,3 +570,17 @@ func TestTrackerARPEvents(t *testing.T) {
 		}
 	})
 }
+
+func TestTrackerCountersSeparateNDAndARP(t *testing.T) {
+	tr, _, _, _ := newTestTracker(t, DefaultTrackerConfig())
+	ctx := context.Background()
+	tr.Observe(ctx, obs(t, "aa:bb:cc:00:00:01", "2001:db8::1"))                              // ND
+	tr.Observe(ctx, arpObs(t, "aa:bb:cc:00:00:02", "192.168.1.5", KindARPReply))             // ARP
+	c := tr.Counters()
+	if c["nd_sightings"] != 1 {
+		t.Errorf("nd_sightings = %d, want 1", c["nd_sightings"])
+	}
+	if c["arp_sightings"] != 1 {
+		t.Errorf("arp_sightings = %d, want 1", c["arp_sightings"])
+	}
+}

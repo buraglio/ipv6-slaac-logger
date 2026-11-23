@@ -236,9 +236,10 @@ func (t *Tracker) Observe(ctx context.Context, o Observation) {
 		ProxySuspect: t.proxy[k.macLV()],
 	}, lastWrite: now}
 	t.add(k, e)
-	t.sightings++
 	if eventFamily(o.Kind) == "arp" {
 		t.arpSightings++
+	} else {
+		t.sightings++
 	}
 	crossed := t.checkProxy(k.macLV())
 
