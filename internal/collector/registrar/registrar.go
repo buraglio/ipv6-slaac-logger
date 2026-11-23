@@ -403,19 +403,22 @@ func (r *Registrar) Sweep(ctx context.Context) {
 		if err != nil {
 			r.Log.Error("registrar: list silent", "err", err)
 		}
-		for _, b := range silent {
-			e := eventFor(event.RegSilent, b, now)
-			if d, err := dhcp6.ParseHex(b.DUID); err == nil {
-				e.DUIDType = dhcp6.DUIDTypeName(d)
+		if len(silent) > 0 {
+			reason := "no renewal for " + r.SilentTimeout.String()
+			ch := store.Change{Events: make([]event.Event, 0, len(silent)), Silence: make([]netip.Addr, 0, len(silent))}
+			for _, b := range silent {
+				e := eventFor(event.RegSilent, b, now)
+				if d, err := dhcp6.ParseHex(b.DUID); err == nil {
+					e.DUIDType = dhcp6.DUIDTypeName(d)
+				}
+				e.FirstSeen = event.TimePtr(b.FirstSeen)
+				e.LastSeen = event.TimePtr(b.LastSeen)
+				e.Reason = reason
+				ch.Events = append(ch.Events, e)
+				ch.Silence = append(ch.Silence, b.Addr)
 			}
-			e.FirstSeen = event.TimePtr(b.FirstSeen)
-			e.LastSeen = event.TimePtr(b.LastSeen)
-			e.Reason = "no renewal for " + r.SilentTimeout.String()
-			if err := r.Rec.Record(ctx, store.Change{
-				Events:  []event.Event{e},
-				Silence: []netip.Addr{b.Addr},
-			}); err != nil {
-				r.Log.Error("registrar: record silent", "addr", b.Addr, "err", err)
+			if err := r.Rec.Record(ctx, ch); err != nil {
+				r.Log.Error("registrar: record silent batch", "count", len(ch.Events), "err", err)
 			}
 		}
 	}
