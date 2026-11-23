@@ -63,12 +63,16 @@ func (r Registrar) Silent() time.Duration {
 type Sniffer struct {
 	IdleTimeout    string `toml:"idle_timeout"`    // default "24h", min 1m
 	LogLinkLocal   bool   `toml:"log_link_local"`  // default false
+	LogARP         *bool  `toml:"log_arp"`         // default true
 	ProxyThreshold int    `toml:"proxy_threshold"` // default 32, min 2
 	MaxEntries     int    `toml:"max_entries"`     // default 100000, min 100
 	MaxRouters     int    `toml:"max_routers"`     // default 1000, min 10
 }
 
 // Idle returns IdleTimeout as a duration (0 if it does not parse).
+// ARP reports whether ARP sightings should produce arp.* events (default true).
+func (s Sniffer) ARP() bool { return s.LogARP == nil || *s.LogARP }
+
 func (s Sniffer) Idle() time.Duration {
 	d, _ := time.ParseDuration(s.IdleTimeout)
 	return d

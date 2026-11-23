@@ -459,3 +459,28 @@ CREATE TABLE forwarder_state (name TEXT PRIMARY KEY, last_id INTEGER NOT NULL);`
 		t.Error("expected silenced=true after Silence on migrated DB")
 	}
 }
+
+func TestIPv4SightingRoundTrip(t *testing.T) {
+	s, _ := openTemp(t)
+	ipv4Addr := netip.MustParseAddr("192.168.1.5")
+	sg := Sighting{
+		MAC: "aa:bb:cc:dd:ee:ff", Addr: ipv4Addr, Link: "eth0", Kind: "arp-reply",
+		FirstSeen: t0, LastSeen: t0,
+	}
+	commitOrFatal(t, s, Change{PutSightings: []Sighting{sg}})
+
+	// query by addr stores and retrieves the IPv4 string unchanged
+	got, err := s.SightingsWhere(ctx, "addr", ipv4Addr.String())
+	if err != nil || len(got) != 1 {
+		t.Fatalf("SightingsWhere addr: %v err %v", got, err)
+	}
+	if got[0].Addr != ipv4Addr || got[0].Kind != "arp-reply" {
+		t.Errorf("got %+v", got[0])
+	}
+
+	// query by mac also returns the IPv4 sighting
+	byMAC, err := s.SightingsWhere(ctx, "mac", "aa:bb:cc:dd:ee:ff")
+	if err != nil || len(byMAC) != 1 || byMAC[0].Addr != ipv4Addr {
+		t.Fatalf("SightingsWhere mac: %v err %v", byMAC, err)
+	}
+}

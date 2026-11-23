@@ -205,3 +205,40 @@ func TestSnifferUnsupportedStops(t *testing.T) {
 		t.Fatalf("calls=%d log:\n%s", calls, out)
 	}
 }
+
+func TestSnifferDispatchesARP(t *testing.T) {
+	reply := arpFrame(t, nil, hostMAC, "192.168.1.5")
+	src := &fakeSource{frames: [][]byte{reply}}
+	s, trec, _, _ := newSniffer(t, func(string) (FrameSource, error) { return src, nil })
+	runFor(t, s, func() bool { return trec.count() > 0 })
+	ev := trec.events()
+	if len(ev) != 1 || ev[0].Type != "arp.new" || ev[0].Kind != KindARPReply {
+		t.Fatalf("events = %+v", ev)
+	}
+	if got := s.Counters()["frames"]; got != 1 {
+		t.Errorf("frames = %d, want 1", got)
+	}
+}
+
+func TestSnifferARPSuppressedWhenLogARPFalse(t *testing.T) {
+	reply := arpFrame(t, nil, hostMAC, "192.168.1.5")
+	src := &fakeSource{frames: [][]byte{reply}}
+	trec := &fakeRec{}
+	buf := &syncBuf{}
+	log := slog.New(slog.NewTextHandler(buf, nil))
+	cfg := DefaultTrackerConfig()
+	cfg.LogARP = false
+	s := &Sniffer{
+		Link:    "eth0",
+		Open:    func(string) (FrameSource, error) { return src, nil },
+		Tracker: NewTracker(cfg, trec, time.Now, log),
+		Log:     log,
+		backoff: func(int) time.Duration { return time.Millisecond },
+	}
+	runFor(t, s, func() bool { return s.Counters()["frames"] > 0 })
+	for _, e := range trec.events() {
+		if strings.HasPrefix(e.Type, "arp.") {
+			t.Fatalf("got arp event %q with log_arp=false", e.Type)
+		}
+	}
+}

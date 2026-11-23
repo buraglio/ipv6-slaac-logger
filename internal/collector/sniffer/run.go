@@ -130,7 +130,28 @@ func (s *Sniffer) read(ctx context.Context, src FrameSource, buf []byte, healthy
 	return nil
 }
 
+// frameEtherType returns the payload ethertype of a frame, skipping at most
+// one VLAN tag layer (0x8100 or 0x88a8). Returns 0 for frames too short.
+func frameEtherType(frame []byte) uint16 {
+	if len(frame) < 14 {
+		return 0
+	}
+	et := uint16(frame[12])<<8 | uint16(frame[13])
+	if (et == 0x8100 || et == 0x88a8) && len(frame) >= 18 {
+		et = uint16(frame[16])<<8 | uint16(frame[17])
+	}
+	return et
+}
+
 func (s *Sniffer) dispatch(ctx context.Context, frame []byte, vlan uint16) {
+	if frameEtherType(frame) == etherARP {
+		if s.Tracker != nil {
+			for _, o := range ARPObservations(frame, vlan, s.Link) {
+				s.Tracker.Observe(ctx, o)
+			}
+		}
+		return
+	}
 	p, err := nd.Parse(frame, vlan)
 	switch {
 	case errors.Is(err, nd.ErrMalformed):
