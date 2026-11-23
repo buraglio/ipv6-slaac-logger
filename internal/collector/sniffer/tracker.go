@@ -23,6 +23,7 @@ type TrackerConfig struct {
 	Idle           time.Duration // 24h
 	Flush          time.Duration // 5m
 	LogLinkLocal   bool          // false
+	LogARP         bool          // true
 	ProxyThreshold int           // 32
 	MaxEntries     int           // 100000
 	EventRate      float64       // 20 per second
@@ -34,6 +35,7 @@ func DefaultTrackerConfig() TrackerConfig {
 	return TrackerConfig{
 		Idle:           24 * time.Hour,
 		Flush:          5 * time.Minute,
+		LogARP:         true,
 		ProxyThreshold: 32,
 		MaxEntries:     100000,
 		EventRate:      20,
@@ -87,7 +89,7 @@ type Tracker struct {
 	proxy   map[macLV]bool
 	bucket  *rate.Limiter
 
-	overflow, suppressed, sightings uint64
+	overflow, suppressed, sightings, arpSightings uint64
 }
 
 // NewTracker returns a Tracker recording through rec.
@@ -195,9 +197,19 @@ func (t *Tracker) newEvent(typ string, e *entry, now time.Time) event.Event {
 	return ev
 }
 
+// eventFamily returns "arp" for ARP observation kinds and "nd" for all others.
+func eventFamily(kind string) string {
+	if len(kind) >= 3 && kind[:3] == "arp" {
+		return "arp"
+	}
+	return "nd"
+}
+
 // quiet reports whether non-rate-limit suppression rules silence e's events.
 func (t *Tracker) quiet(e *entry) bool {
-	return e.ProxySuspect || (e.Addr.IsLinkLocalUnicast() && !t.cfg.LogLinkLocal)
+	return e.ProxySuspect ||
+		(e.Addr.IsLinkLocalUnicast() && !t.cfg.LogLinkLocal) ||
+		(eventFamily(e.Kind) == "arp" && !t.cfg.LogARP)
 }
 
 // Observe records one observation.
@@ -225,18 +237,22 @@ func (t *Tracker) Observe(ctx context.Context, o Observation) {
 	}, lastWrite: now}
 	t.add(k, e)
 	t.sightings++
+	if eventFamily(o.Kind) == "arp" {
+		t.arpSightings++
+	}
 	crossed := t.checkProxy(k.macLV())
 
 	var ch store.Change
 	if !t.quiet(e) {
-		typ, prev := event.NDNew, ""
+		fam := eventFamily(o.Kind)
+		typ, prev := fam+".new", ""
 		var prevE *entry
 		for ok2, other := range t.byAddr[k.addr] {
 			if ok2.link != k.link || ok2.vlan != k.vlan || ok2.mac == k.mac || other.ProxySuspect {
 				continue
 			}
 			if prevE == nil || other.LastSeen.After(prevE.LastSeen) {
-				typ, prev, prevE = event.NDConflict, ok2.mac, other
+				typ, prev, prevE = fam+".conflict", ok2.mac, other
 			}
 		}
 		if t.bucket.AllowN(now, 1) {
@@ -311,7 +327,7 @@ func (t *Tracker) tick(ctx context.Context, flushAll bool) {
 		if !flushAll && now.Sub(e.LastSeen) >= t.cfg.Idle {
 			if !e.expireEmitted {
 				if e.announced && !t.quiet(e) {
-					ev := t.newEvent(event.NDExpire, e, now)
+					ev := t.newEvent(eventFamily(e.Kind)+".expire", e, now)
 					ev.FirstSeen, ev.LastSeen = event.TimePtr(e.FirstSeen), event.TimePtr(e.LastSeen)
 					ch.Events = append(ch.Events, ev)
 				}
@@ -385,5 +401,6 @@ func (t *Tracker) Counters() map[string]uint64 {
 		"sniff_overflow": t.overflow,
 		"nd_suppressed":  t.suppressed,
 		"nd_sightings":   t.sightings,
+		"arp_sightings":  t.arpSightings,
 	}
 }
