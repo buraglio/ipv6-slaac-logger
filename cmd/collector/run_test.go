@@ -211,7 +211,7 @@ func TestStatsCounterNamesAreUnique(t *testing.T) {
 		t.Fatalf("counter names claimed by more than one component: %v", dup)
 	}
 	for _, name := range []string{"received", "dropped", "sniff_overflow", "nd_suppressed", "nd_sightings",
-		"nd_invalid", "ra_seen_total", "ra_overflow", "ra_suppressed", "frames", "nd_malformed", "nd_not_nd"} {
+		"arp_sightings", "nd_invalid", "ra_seen_total", "ra_overflow", "ra_suppressed", "frames", "nd_malformed", "nd_not_nd"} {
 		if _, ok := merged[name]; !ok {
 			t.Errorf("stats counter %q missing", name)
 		}

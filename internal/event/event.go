@@ -15,6 +15,9 @@ const (
 	RegDereg    = "reg.dereg"
 	RegExpire   = "reg.expire"
 	RegSilent   = "reg.silent"
+	ARPNew      = "arp.new"
+	ARPConflict = "arp.conflict"
+	ARPExpire   = "arp.expire"
 	RegConflict = "reg.conflict"
 	RegReject   = "reg.reject"
 	NDNew       = "nd.new"
@@ -88,7 +91,7 @@ func TimePtr(t time.Time) *time.Time {
 // Severity maps the event type to a syslog severity (spec §5.7).
 func (e Event) Severity() Severity {
 	switch e.Type {
-	case RegConflict, NDConflict, RAChange, RegExpire, RegSilent, NDExpire:
+	case RegConflict, NDConflict, RAChange, RegExpire, RegSilent, NDExpire, ARPConflict:
 		return SevNotice
 	case RegReject, StoreError:
 		return SevWarning

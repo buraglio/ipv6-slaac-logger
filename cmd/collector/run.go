@@ -115,6 +115,7 @@ func run(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func(n
 
 	tcfg := sniffer.DefaultTrackerConfig()
 	tcfg.Idle, tcfg.LogLinkLocal = cfg.Sniffer.Idle(), cfg.Sniffer.LogLinkLocal
+	tcfg.LogARP = cfg.Sniffer.ARP()
 	tcfg.ProxyThreshold, tcfg.MaxEntries = cfg.Sniffer.ProxyThreshold, cfg.Sniffer.MaxEntries
 	tracker := sniffer.NewTracker(tcfg, rec, time.Now, log)
 	rcfg := sniffer.DefaultRAMonitorConfig()

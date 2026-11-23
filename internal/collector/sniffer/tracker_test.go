@@ -520,3 +520,67 @@ func TestTrackerFlush(t *testing.T) {
 		t.Fatal("second flush wrote again")
 	}
 }
+
+func arpObs(t testing.TB, mac, ipv4 string, kind string) Observation {
+	return Observation{MAC: mustMAC(t, mac), Addr: netip.MustParseAddr(ipv4), Link: "eth0", Kind: kind}
+}
+
+func TestTrackerARPEvents(t *testing.T) {
+	cfg := DefaultTrackerConfig()
+	cfg.Idle = time.Hour
+
+	t.Run("arp.new on first observation", func(t *testing.T) {
+		tr, rec, _, _ := newTestTracker(t, cfg)
+		tr.Observe(context.Background(), arpObs(t, "aa:bb:cc:00:00:01", "192.168.1.5", KindARPReply))
+		ev := rec.events()
+		if len(ev) != 1 || ev[0].Type != event.ARPNew {
+			t.Fatalf("events = %+v", ev)
+		}
+	})
+
+	t.Run("arp.conflict when MAC changes for same IPv4", func(t *testing.T) {
+		tr, rec, _, _ := newTestTracker(t, cfg)
+		ctx := context.Background()
+		tr.Observe(ctx, arpObs(t, "aa:bb:cc:00:00:01", "192.168.1.5", KindARPReply))
+		tr.Observe(ctx, arpObs(t, "aa:bb:cc:00:00:02", "192.168.1.5", KindARPReply))
+		ev := rec.events()
+		if len(ev) != 2 || ev[1].Type != event.ARPConflict || ev[1].PrevMAC != "aa:bb:cc:00:00:01" {
+			t.Fatalf("events = %+v", ev)
+		}
+	})
+
+	t.Run("arp.expire after idle timeout", func(t *testing.T) {
+		tr, rec, clk, _ := newTestTracker(t, cfg)
+		ctx := context.Background()
+		tr.Observe(ctx, arpObs(t, "aa:bb:cc:00:00:01", "192.168.1.5", KindARPReply))
+		clk.t = clk.t.Add(cfg.Idle + time.Second)
+		tr.Tick(ctx)
+		ev := rec.events()
+		if len(ev) != 2 || ev[1].Type != event.ARPExpire {
+			t.Fatalf("events = %+v", ev)
+		}
+	})
+
+	t.Run("ND observations still produce nd.* events", func(t *testing.T) {
+		tr, rec, _, _ := newTestTracker(t, cfg)
+		tr.Observe(context.Background(), obs(t, "aa:bb:cc:00:00:01", "2001:db8::1"))
+		ev := rec.events()
+		if len(ev) != 1 || ev[0].Type != event.NDNew {
+			t.Fatalf("ND event = %+v", ev)
+		}
+	})
+}
+
+func TestTrackerCountersSeparateNDAndARP(t *testing.T) {
+	tr, _, _, _ := newTestTracker(t, DefaultTrackerConfig())
+	ctx := context.Background()
+	tr.Observe(ctx, obs(t, "aa:bb:cc:00:00:01", "2001:db8::1"))                              // ND
+	tr.Observe(ctx, arpObs(t, "aa:bb:cc:00:00:02", "192.168.1.5", KindARPReply))             // ARP
+	c := tr.Counters()
+	if c["nd_sightings"] != 1 {
+		t.Errorf("nd_sightings = %d, want 1", c["nd_sightings"])
+	}
+	if c["arp_sightings"] != 1 {
+		t.Errorf("arp_sightings = %d, want 1", c["arp_sightings"])
+	}
+}

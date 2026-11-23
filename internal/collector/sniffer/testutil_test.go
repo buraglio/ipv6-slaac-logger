@@ -107,3 +107,45 @@ const (
 	hostLL  = "fe80::5e1e:9aff:fe3b:21aa"
 	hostGUA = "2001:db8::5c1e:9aff:fe3b:21aa"
 )
+
+// arpFrame builds an Ethernet ARP frame (op=2 reply by default) with the given
+// VLAN tags, sender MAC, and sender IP. Target fields are zeroed.
+func arpFrame(t testing.TB, vlans []uint16, senderMAC, senderIP string) []byte {
+	t.Helper()
+	return arpFrameRaw(t, vlans, 1, 0x0800, 2, senderMAC, senderIP)
+}
+
+// arpFrameRaw builds a raw ARP Ethernet frame with explicit hardware type,
+// protocol type, and operation. Use hwType=1,protoType=0x0800 for normal IPv4-over-Ethernet ARP.
+func arpFrameRaw(t testing.TB, vlans []uint16, hwType, protoType, op uint16, senderMAC, senderIP string) []byte {
+	t.Helper()
+	var f []byte
+	f = append(f, mustMAC(t, "ff:ff:ff:ff:ff:ff")...) // dst
+	f = append(f, mustMAC(t, senderMAC)...)            // src
+	for i, v := range vlans {
+		tpid := uint16(0x8100)
+		if i == 0 && len(vlans) == 2 {
+			tpid = 0x88a8
+		}
+		f = binary.BigEndian.AppendUint16(f, tpid)
+		f = binary.BigEndian.AppendUint16(f, v)
+	}
+	f = binary.BigEndian.AppendUint16(f, 0x0806) // ethertype ARP
+	// ARP payload (28 bytes for IPv4-over-Ethernet)
+	f = binary.BigEndian.AppendUint16(f, hwType)    // hardware type
+	f = binary.BigEndian.AppendUint16(f, protoType) // protocol type
+	f = append(f, 6, 4)                             // hlen=6, plen=4
+	f = binary.BigEndian.AppendUint16(f, op)        // operation
+	smac, _ := net.ParseMAC(senderMAC)
+	if smac == nil {
+		smac = make(net.HardwareAddr, 6)
+	}
+	f = append(f, smac...)    // sender MAC
+	ip := net.ParseIP(senderIP).To4()
+	if ip == nil {
+		ip = make([]byte, 4)
+	}
+	f = append(f, ip...)            // sender IP
+	f = append(f, make([]byte, 10)...) // target MAC (6) + target IP (4)
+	return f
+}

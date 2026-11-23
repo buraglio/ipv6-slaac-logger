@@ -35,6 +35,7 @@ trusted_relays   = []   # source prefixes of DHCPv6 relay agents allowed to forw
 # [sniffer]
 # idle_timeout    = "24h"   # min "1m". A sighting not seen for this long is expired and an nd.expire event is logged.
 # log_link_local  = false   # false: link-local (fe80::/10) sightings go to the database only, with no nd.* events.
+# log_arp         = true    # false: ARP (MAC→IPv4) sightings go to the database only, with no arp.* events.
 # proxy_threshold = 32      # min 2. A MAC seen with MORE than this many addresses on one link+VLAN is marked
 #                           # proxy_suspect (a proxy-ND router, say): it gets no further nd.* events and is
 #                           # ignored by the hosts view and the registrar's MAC lookup. Its sightings are still stored.
