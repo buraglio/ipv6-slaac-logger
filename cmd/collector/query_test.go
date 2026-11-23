@@ -244,3 +244,87 @@ func TestQueryOnPreSnifferDatabase(t *testing.T) {
 		}
 	}
 }
+
+func TestQuerySightingsFlag(t *testing.T) {
+	path, _ := sightingDB(t)
+
+	// text output lists the sighting
+	var out bytes.Buffer
+	if err := queryCmd([]string{"-db", path, "-sightings"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "aa:bb:cc:dd:ee:ff") || !strings.Contains(out.String(), "2001:db8:10::5") {
+		t.Fatalf("text output missing sighting:\n%s", out.String())
+	}
+
+	// JSON output is a non-empty array
+	out.Reset()
+	if err := queryCmd([]string{"-db", path, "-sightings", "-json"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	var sgs []json.RawMessage
+	if err := json.Unmarshal(out.Bytes(), &sgs); err != nil || len(sgs) != 1 {
+		t.Fatalf("json output: %s (%v)", out.String(), err)
+	}
+
+	// pre-sniffer database (no sightings table) returns "(none)", not an error
+	path2 := filepath.Join(t.TempDir(), "nosniffer.db")
+	st2, err := store.Open(path2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db2, _ := sql.Open("sqlite", path2)
+	db2.Exec(`DROP TABLE sightings`)
+	db2.Close()
+	st2.Close()
+	out.Reset()
+	if err := queryCmd([]string{"-db", path2, "-sightings"}, &out); err != nil {
+		t.Fatalf("pre-sniffer db: %v", err)
+	}
+	if !strings.Contains(out.String(), "(none)") {
+		t.Fatalf("pre-sniffer db: expected (none), got:\n%s", out.String())
+	}
+}
+
+func TestQuerySilentFlag(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "silent.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	addr := netip.MustParseAddr("2001:db8:10::1")
+	b := store.Binding{Addr: addr, DUID: "00:03:00:01:aa:bb:cc:dd:ee:ff", Link: "eth0",
+		FirstSeen: t0, LastSeen: t0, ExpiresAt: t0.Add(24 * time.Hour)}
+	if err := st.Commit(context.Background(), store.Change{
+		Put:     []store.Binding{b},
+		Silence: []netip.Addr{addr},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	// text output lists the silenced binding
+	var out bytes.Buffer
+	if err := queryCmd([]string{"-db", path, "-silent"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), addr.String()) {
+		t.Fatalf("text output missing silenced binding:\n%s", out.String())
+	}
+
+	// empty database returns "(none)", not an error
+	path2 := filepath.Join(t.TempDir(), "nosilent.db")
+	st2, err := store.Open(path2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st2.Close()
+	out.Reset()
+	if err := queryCmd([]string{"-db", path2, "-silent"}, &out); err != nil {
+		t.Fatalf("empty db: %v", err)
+	}
+	if !strings.Contains(out.String(), "(none)") {
+		t.Fatalf("empty db: expected (none), got:\n%s", out.String())
+	}
+}

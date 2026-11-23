@@ -11,7 +11,6 @@ import (
 	"math"
 	"net/netip"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/buraglio/ipv6-slaac-logger/internal/event"
@@ -213,6 +212,33 @@ func OpenReadOnly(path string) (*Store, error) {
 	return open(path+"?_pragma=query_only(1)&_pragma=busy_timeout(5000)", false)
 }
 
+// addColumnIfMissing runs alter only when the column is absent, avoiding the
+// "duplicate column name" error that ALTER TABLE returns on repeat opens.
+func addColumnIfMissing(db *sql.DB, table, column, alter string) error {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(alter)
+	return err
+}
+
 func open(dsn string, initSchema bool) (*Store, error) {
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -225,13 +251,10 @@ func open(dsn string, initSchema bool) (*Store, error) {
 			return nil, fmt.Errorf("store: init schema: %w", err)
 		}
 		// Migration: add silenced column to existing databases that predate it.
-		// ALTER TABLE ADD COLUMN is a no-op if the column already exists in SQLite
-		// terms only when it returns "duplicate column name"; any other error is real.
-		if _, err := db.Exec(`ALTER TABLE bindings ADD COLUMN silenced INTEGER NOT NULL DEFAULT 0`); err != nil {
-			if !strings.Contains(err.Error(), "duplicate column name") {
-				db.Close()
-				return nil, fmt.Errorf("store: migrate bindings.silenced: %w", err)
-			}
+		if err := addColumnIfMissing(db, "bindings", "silenced",
+			`ALTER TABLE bindings ADD COLUMN silenced INTEGER NOT NULL DEFAULT 0`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("store: migrate bindings.silenced: %w", err)
 		}
 	} else if err := db.Ping(); err != nil {
 		db.Close()
